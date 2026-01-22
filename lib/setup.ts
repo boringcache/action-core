@@ -2,6 +2,7 @@ import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import * as tc from '@actions/tool-cache';
 import * as cache from '@actions/cache';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -14,6 +15,8 @@ export interface SetupOptions {
   token?: string;
   /** Enable automatic caching across workflow runs (default: true) */
   cache?: boolean;
+  /** Verify SHA256 checksum of downloaded binary (default: true) */
+  verify?: boolean;
 }
 
 export interface ToolCacheInfo {
@@ -105,11 +108,101 @@ function getDownloadUrl(version: string, assetName: string): string {
   return `${GITHUB_RELEASES_BASE}/${version}/${assetName}`;
 }
 
-async function downloadAndInstall(version: string, platform: PlatformInfo): Promise<string> {
+function getChecksumsUrl(version: string): string {
+  return `${GITHUB_RELEASES_BASE}/${version}/SHA256SUMS`;
+}
+
+/**
+ * Compute SHA256 hash of a file
+ */
+async function computeFileHash(filePath: string): Promise<string> {
+  const fileBuffer = await fs.promises.readFile(filePath);
+  const hashSum = crypto.createHash('sha256');
+  hashSum.update(fileBuffer);
+  return hashSum.digest('hex');
+}
+
+/**
+ * Parse SHA256SUMS file content and extract checksum for a specific asset
+ * Format: <sha256>  <filename> (two spaces between hash and filename)
+ * or: <sha256> <filename> (single space)
+ */
+function parseChecksums(content: string, assetName: string): string | null {
+  const lines = content.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // Match either "hash  filename" or "hash filename"
+    const match = trimmed.match(/^([a-f0-9]{64})\s+(.+)$/i);
+    if (match) {
+      const [, hash, filename] = match;
+      // Match exact filename or filename at end of path
+      if (filename === assetName || filename.endsWith(`/${assetName}`)) {
+        return hash.toLowerCase();
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Download SHA256SUMS and get expected checksum for the asset
+ */
+async function getExpectedChecksum(version: string, assetName: string): Promise<string> {
+  const checksumsUrl = getChecksumsUrl(version);
+  core.debug(`Downloading checksums from: ${checksumsUrl}`);
+
+  try {
+    const checksumsPath = await tc.downloadTool(checksumsUrl);
+    const content = await fs.promises.readFile(checksumsPath, 'utf-8');
+    const checksum = parseChecksums(content, assetName);
+
+    if (!checksum) {
+      throw new Error(`Checksum not found for asset: ${assetName}`);
+    }
+
+    return checksum;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to fetch checksums from ${checksumsUrl}: ${msg}`);
+  }
+}
+
+/**
+ * Verify file checksum matches expected value
+ */
+async function verifyChecksum(filePath: string, expectedChecksum: string, assetName: string): Promise<void> {
+  const actualChecksum = await computeFileHash(filePath);
+
+  if (actualChecksum !== expectedChecksum) {
+    throw new Error(
+      `Checksum verification failed for ${assetName}:\n` +
+      `  Expected: ${expectedChecksum}\n` +
+      `  Actual:   ${actualChecksum}`
+    );
+  }
+
+  core.info(`Checksum verified for ${assetName}`);
+}
+
+async function downloadAndInstall(
+  version: string,
+  platform: PlatformInfo,
+  verify: boolean
+): Promise<string> {
   const downloadUrl = getDownloadUrl(version, platform.assetName);
   core.info(`Downloading BoringCache CLI from: ${downloadUrl}`);
 
   const downloadedPath = await tc.downloadTool(downloadUrl);
+
+  // Verify checksum if enabled
+  if (verify) {
+    const expectedChecksum = await getExpectedChecksum(version, platform.assetName);
+    await verifyChecksum(downloadedPath, expectedChecksum, platform.assetName);
+  } else {
+    core.warning('Checksum verification disabled - this is not recommended for production use');
+  }
 
   const binaryName = platform.isWindows ? 'boringcache.exe' : 'boringcache';
   const installDir = path.join(os.tmpdir(), 'boringcache-install', version);
@@ -166,6 +259,7 @@ export async function ensureBoringCache(options: SetupOptions): Promise<void> {
   const normalizedVersion = version.startsWith('v') ? version : `v${version}`;
   const platform = getPlatformInfo();
   const enableCache = options.cache !== false;
+  const enableVerify = options.verify !== false; // Default: true
 
   core.info(`Installing BoringCache CLI ${normalizedVersion}...`);
 
@@ -194,7 +288,7 @@ export async function ensureBoringCache(options: SetupOptions): Promise<void> {
     core.info(`Using cached BoringCache CLI`);
     toolPath = cachedPath;
   } else {
-    toolPath = await downloadAndInstall(normalizedVersion, platform);
+    toolPath = await downloadAndInstall(normalizedVersion, platform, enableVerify);
 
     // Save to actions/cache for future workflow runs
     if (enableCache && !restoredFromCache) {

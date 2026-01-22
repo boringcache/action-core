@@ -1,16 +1,30 @@
 import * as os from 'os';
+import * as crypto from 'crypto';
 
 // Mock the modules before importing
 jest.mock('@actions/core');
 jest.mock('@actions/exec');
 jest.mock('@actions/tool-cache');
 jest.mock('@actions/cache');
+
+// Create a predictable "binary" content and its hash
+const MOCK_BINARY_CONTENT = Buffer.from('mock-binary-content');
+const MOCK_BINARY_HASH = crypto.createHash('sha256').update(MOCK_BINARY_CONTENT).digest('hex');
+
+// Sample SHA256SUMS content using the mock binary hash
+const SAMPLE_SHA256SUMS = `${MOCK_BINARY_HASH}  boringcache-linux-amd64
+${MOCK_BINARY_HASH}  boringcache-linux-arm64
+${MOCK_BINARY_HASH}  boringcache-macos-14-arm64
+${MOCK_BINARY_HASH}  boringcache-windows-2022-amd64.exe
+`;
+
 jest.mock('fs', () => ({
   ...jest.requireActual('fs'),
   promises: {
     mkdir: jest.fn().mockResolvedValue(undefined),
     copyFile: jest.fn().mockResolvedValue(undefined),
     chmod: jest.fn().mockResolvedValue(undefined),
+    readFile: jest.fn(),
   },
 }));
 
@@ -18,12 +32,14 @@ import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import * as tc from '@actions/tool-cache';
 import * as cache from '@actions/cache';
+import * as fs from 'fs';
 import { ensureBoringCache, execBoringCache, isCliAvailable, getToolCacheInfo } from '../lib/setup';
 
 const mockedCore = jest.mocked(core);
 const mockedExec = jest.mocked(exec);
 const mockedTc = jest.mocked(tc);
 const mockedCache = jest.mocked(cache);
+const mockedFs = jest.mocked(fs);
 
 describe('action-core', () => {
   beforeEach(() => {
@@ -35,6 +51,15 @@ describe('action-core', () => {
     // Default cache mocks
     mockedCache.restoreCache.mockResolvedValue(undefined);
     mockedCache.saveCache.mockResolvedValue(1);
+    // Mock fs.readFile to return appropriate content based on path
+    mockedFs.promises.readFile.mockImplementation((path: any, encoding?: any) => {
+      // If reading the checksums file (string encoding)
+      if (encoding === 'utf-8' || typeof path === 'string' && path.includes('SHA256SUMS')) {
+        return Promise.resolve(SAMPLE_SHA256SUMS);
+      }
+      // Otherwise return binary content (for hash computation)
+      return Promise.resolve(MOCK_BINARY_CONTENT);
+    });
   });
 
   describe('isCliAvailable', () => {
@@ -122,8 +147,12 @@ describe('action-core', () => {
 
       await ensureBoringCache({ version: 'v1.0.0' });
 
+      // Should download both binary and checksums
       expect(mockedTc.downloadTool).toHaveBeenCalledWith(
         'https://github.com/boringcache/cli/releases/download/v1.0.0/boringcache-linux-amd64'
+      );
+      expect(mockedTc.downloadTool).toHaveBeenCalledWith(
+        'https://github.com/boringcache/cli/releases/download/v1.0.0/SHA256SUMS'
       );
       expect(mockedCore.addPath).toHaveBeenCalledWith('/tmp/cached');
     });
@@ -174,6 +203,96 @@ describe('action-core', () => {
     });
   });
 
+  describe('checksum verification', () => {
+    beforeEach(() => {
+      mockedExec.exec.mockRejectedValueOnce(new Error('Command not found'));
+      mockedTc.find.mockReturnValue('');
+      mockedTc.downloadTool.mockResolvedValue('/tmp/downloaded');
+      mockedTc.cacheDir.mockResolvedValue('/tmp/cached');
+      process.env.RUNNER_OS = 'Linux';
+      process.env.RUNNER_ARCH = 'X64';
+    });
+
+    it('verifies checksum by default', async () => {
+      await ensureBoringCache({ version: 'v1.0.0' });
+
+      // Should download SHA256SUMS
+      expect(mockedTc.downloadTool).toHaveBeenCalledWith(
+        'https://github.com/boringcache/cli/releases/download/v1.0.0/SHA256SUMS'
+      );
+      expect(mockedCore.info).toHaveBeenCalledWith(
+        expect.stringContaining('Checksum verified')
+      );
+    });
+
+    it('skips verification when verify: false', async () => {
+      await ensureBoringCache({ version: 'v1.0.0', verify: false });
+
+      // Should only download binary, not checksums
+      const downloadCalls = mockedTc.downloadTool.mock.calls;
+      expect(downloadCalls).toHaveLength(1);
+      expect(downloadCalls[0][0]).toContain('boringcache-linux-amd64');
+      expect(downloadCalls[0][0]).not.toContain('SHA256SUMS');
+
+      expect(mockedCore.warning).toHaveBeenCalledWith(
+        'Checksum verification disabled - this is not recommended for production use'
+      );
+    });
+
+    it('throws error when checksum not found in SHA256SUMS', async () => {
+      mockedFs.promises.readFile.mockImplementation((path: any, encoding?: any) => {
+        if (encoding === 'utf-8') {
+          return Promise.resolve('abc123  some-other-file\n');
+        }
+        return Promise.resolve(MOCK_BINARY_CONTENT);
+      });
+
+      await expect(ensureBoringCache({ version: 'v1.0.0' })).rejects.toThrow(
+        'Checksum not found for asset: boringcache-linux-amd64'
+      );
+    });
+
+    it('throws error when SHA256SUMS download fails', async () => {
+      mockedTc.downloadTool
+        .mockResolvedValueOnce('/tmp/binary') // binary download succeeds
+        .mockRejectedValueOnce(new Error('404 Not Found')); // checksums fails
+
+      await expect(ensureBoringCache({ version: 'v1.0.0' })).rejects.toThrow(
+        'Failed to fetch checksums'
+      );
+    });
+
+    it('parses SHA256SUMS with single space separator', async () => {
+      mockedFs.promises.readFile.mockImplementation((path: any, encoding?: any) => {
+        if (encoding === 'utf-8') {
+          return Promise.resolve(`${MOCK_BINARY_HASH} boringcache-linux-amd64\n`);
+        }
+        return Promise.resolve(MOCK_BINARY_CONTENT);
+      });
+
+      await ensureBoringCache({ version: 'v1.0.0' });
+
+      expect(mockedCore.info).toHaveBeenCalledWith(
+        expect.stringContaining('Checksum verified')
+      );
+    });
+
+    it('parses SHA256SUMS with double space separator', async () => {
+      mockedFs.promises.readFile.mockImplementation((path: any, encoding?: any) => {
+        if (encoding === 'utf-8') {
+          return Promise.resolve(`${MOCK_BINARY_HASH}  boringcache-linux-amd64\n`);
+        }
+        return Promise.resolve(MOCK_BINARY_CONTENT);
+      });
+
+      await ensureBoringCache({ version: 'v1.0.0' });
+
+      expect(mockedCore.info).toHaveBeenCalledWith(
+        expect.stringContaining('Checksum verified')
+      );
+    });
+  });
+
   describe('execBoringCache', () => {
     it('executes boringcache command', async () => {
       mockedExec.exec.mockResolvedValue(0);
@@ -214,12 +333,14 @@ describe('action-core', () => {
   });
 
   describe('platform detection', () => {
-    it('handles Linux x64', async () => {
+    beforeEach(() => {
       mockedExec.exec.mockRejectedValueOnce(new Error('not found'));
       mockedTc.find.mockReturnValue('');
       mockedTc.downloadTool.mockResolvedValue('/tmp/dl');
       mockedTc.cacheDir.mockResolvedValue('/tmp/cache');
+    });
 
+    it('handles Linux x64', async () => {
       process.env.RUNNER_OS = 'Linux';
       process.env.RUNNER_ARCH = 'X64';
 
@@ -231,11 +352,6 @@ describe('action-core', () => {
     });
 
     it('handles Linux ARM64', async () => {
-      mockedExec.exec.mockRejectedValueOnce(new Error('not found'));
-      mockedTc.find.mockReturnValue('');
-      mockedTc.downloadTool.mockResolvedValue('/tmp/dl');
-      mockedTc.cacheDir.mockResolvedValue('/tmp/cache');
-
       process.env.RUNNER_OS = 'Linux';
       process.env.RUNNER_ARCH = 'ARM64';
 
@@ -247,11 +363,6 @@ describe('action-core', () => {
     });
 
     it('handles macOS', async () => {
-      mockedExec.exec.mockRejectedValueOnce(new Error('not found'));
-      mockedTc.find.mockReturnValue('');
-      mockedTc.downloadTool.mockResolvedValue('/tmp/dl');
-      mockedTc.cacheDir.mockResolvedValue('/tmp/cache');
-
       process.env.RUNNER_OS = 'macOS';
       process.env.RUNNER_ARCH = 'ARM64';
 
@@ -263,11 +374,6 @@ describe('action-core', () => {
     });
 
     it('handles Windows', async () => {
-      mockedExec.exec.mockRejectedValueOnce(new Error('not found'));
-      mockedTc.find.mockReturnValue('');
-      mockedTc.downloadTool.mockResolvedValue('/tmp/dl');
-      mockedTc.cacheDir.mockResolvedValue('/tmp/cache');
-
       process.env.RUNNER_OS = 'Windows';
       process.env.RUNNER_ARCH = 'X64';
 
