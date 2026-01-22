@@ -4,16 +4,12 @@ on:
   push:
     branches: [main]
     paths:
-      - 'action-core/**'
+      - 'lib/**'
+      - 'package.json'
+      - 'tsconfig.json'
   pull_request:
     branches: [main]
-    paths:
-      - 'action-core/**'
   workflow_dispatch:
-
-defaults:
-  run:
-    working-directory: action-core
 
 jobs:
   test:
@@ -28,7 +24,6 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: action-core/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -43,29 +38,8 @@ jobs:
         uses: codecov/codecov-action@v4
         if: always()
         with:
-          directory: action-core/coverage
-          flags: action-core
+          directory: coverage
         continue-on-error: true
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: action-core/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Check TypeScript
-        run: npm run build
 
   build-matrix:
     name: Build (Node ${{ matrix.node }})

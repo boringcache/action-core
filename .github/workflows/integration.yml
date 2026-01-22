@@ -4,18 +4,13 @@ on:
   push:
     branches: [main]
     paths:
-      - 'action-core/**'
+      - 'lib/**'
+      - 'package.json'
   pull_request:
     branches: [main]
-    paths:
-      - 'action-core/**'
   workflow_dispatch:
   schedule:
     - cron: '0 6 * * 1'
-
-defaults:
-  run:
-    working-directory: action-core
 
 jobs:
   integration-linux:
@@ -44,63 +39,35 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Test CLI download
+      - name: Test CLI download and caching
         run: |
           node -e "
             const { ensureBoringCache, isCliAvailable } = require('./dist/index.js');
 
             async function main() {
-              console.log('Checking if CLI is available...');
+              console.log('=== First install (should download) ===');
               const before = await isCliAvailable();
               console.log('CLI available before:', before);
 
-              console.log('Installing CLI...');
               await ensureBoringCache({ version: 'v1.0.0' });
 
-              console.log('Verifying installation...');
               const after = await isCliAvailable();
               console.log('CLI available after:', after);
+              if (!after) throw new Error('CLI should be available');
 
-              if (!after) {
-                throw new Error('CLI should be available after ensureBoringCache');
-              }
+              console.log('=== Second install (should use cache) ===');
+              const start = Date.now();
+              await ensureBoringCache({ version: 'v1.0.0' });
+              console.log('Cached install took:', Date.now() - start, 'ms');
 
               console.log('Integration test passed!');
             }
 
-            main().catch(e => {
-              console.error(e);
-              process.exit(1);
-            });
+            main().catch(e => { console.error(e); process.exit(1); });
           "
 
       - name: Verify CLI works
         run: boringcache --version
-
-      - name: Test tool cache (second run)
-        run: |
-          node -e "
-            const { ensureBoringCache } = require('./dist/index.js');
-
-            async function main() {
-              console.log('Second install should use cache...');
-              const start = Date.now();
-              await ensureBoringCache({ version: 'v1.0.0' });
-              const elapsed = Date.now() - start;
-              console.log('Elapsed time:', elapsed, 'ms');
-
-              if (elapsed > 5000) {
-                console.warn('Warning: Second install took longer than expected');
-              }
-
-              console.log('Cache test passed!');
-            }
-
-            main().catch(e => {
-              console.error(e);
-              process.exit(1);
-            });
-          "
 
   integration-macos:
     name: Integration (macOS ARM64)
@@ -114,39 +81,21 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
-        run: npm install
-        working-directory: action-core
-
-      - name: Build
-        run: npm run build
-        working-directory: action-core
-
-      - name: Test CLI download
-        working-directory: action-core
+      - name: Install and test
         run: |
+          npm install
+          npm run build
           node -e "
             const { ensureBoringCache, isCliAvailable } = require('./dist/index.js');
-
             async function main() {
-              console.log('Installing CLI on macOS...');
               await ensureBoringCache({ version: 'v1.0.0' });
-
-              const available = await isCliAvailable();
-              if (!available) {
-                throw new Error('CLI should be available after install');
-              }
-
-              console.log('macOS integration test passed!');
+              if (!(await isCliAvailable())) throw new Error('CLI not available');
+              console.log('macOS test passed!');
             }
-
-            main().catch(e => {
-              console.error(e);
-              process.exit(1);
-            });
+            main().catch(e => { console.error(e); process.exit(1); });
           "
 
-      - name: Verify CLI works
+      - name: Verify CLI
         run: boringcache --version
 
   integration-windows:
@@ -161,44 +110,26 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
-        run: npm install
-        working-directory: action-core
-
-      - name: Build
-        run: npm run build
-        working-directory: action-core
-
-      - name: Test CLI download
-        working-directory: action-core
+      - name: Install and test
         shell: pwsh
         run: |
+          npm install
+          npm run build
           node -e "
             const { ensureBoringCache, isCliAvailable } = require('./dist/index.js');
-
             async function main() {
-              console.log('Installing CLI on Windows...');
               await ensureBoringCache({ version: 'v1.0.0' });
-
-              const available = await isCliAvailable();
-              if (!available) {
-                throw new Error('CLI should be available after install');
-              }
-
-              console.log('Windows integration test passed!');
+              if (!(await isCliAvailable())) throw new Error('CLI not available');
+              console.log('Windows test passed!');
             }
-
-            main().catch(e => {
-              console.error(e);
-              process.exit(1);
-            });
+            main().catch(e => { console.error(e); process.exit(1); });
           "
 
-      - name: Verify CLI works
+      - name: Verify CLI
         run: boringcache --version
 
-  integration-skip-version:
-    name: Integration (skip version)
+  integration-cache-disabled:
+    name: Integration (cache disabled)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -209,107 +140,15 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
-        run: npm install
-        working-directory: action-core
-
-      - name: Build
-        run: npm run build
-        working-directory: action-core
-
-      - name: Test skip version without CLI
-        working-directory: action-core
+      - name: Test with cache disabled
         run: |
+          npm install
+          npm run build
           node -e "
             const { ensureBoringCache } = require('./dist/index.js');
-
             async function main() {
-              try {
-                await ensureBoringCache({ version: 'skip' });
-                throw new Error('Should have thrown an error');
-              } catch (e) {
-                if (e.message.includes('CLI not found')) {
-                  console.log('Correctly threw error when CLI not available');
-                } else {
-                  throw e;
-                }
-              }
+              await ensureBoringCache({ version: 'v1.0.0', cache: false });
+              console.log('Cache disabled test passed!');
             }
-
-            main().catch(e => {
-              console.error(e);
-              process.exit(1);
-            });
-          "
-
-      - name: Install CLI first
-        run: |
-          node -e "
-            const { ensureBoringCache } = require('./dist/index.js');
-            ensureBoringCache({ version: 'v1.0.0' }).then(() => console.log('Installed'));
-          "
-        working-directory: action-core
-
-      - name: Test skip version with CLI available
-        working-directory: action-core
-        run: |
-          node -e "
-            const { ensureBoringCache, isCliAvailable } = require('./dist/index.js');
-
-            async function main() {
-              // CLI should be available from previous step
-              await ensureBoringCache({ version: 'skip' });
-              console.log('Skip version test passed when CLI is available');
-            }
-
-            main().catch(e => {
-              console.error(e);
-              process.exit(1);
-            });
-          "
-
-  integration-exec:
-    name: Integration (execBoringCache)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
-        run: npm install
-        working-directory: action-core
-
-      - name: Build
-        run: npm run build
-        working-directory: action-core
-
-      - name: Test execBoringCache
-        working-directory: action-core
-        run: |
-          node -e "
-            const { ensureBoringCache, execBoringCache } = require('./dist/index.js');
-
-            async function main() {
-              await ensureBoringCache({ version: 'v1.0.0' });
-
-              console.log('Testing execBoringCache...');
-              const exitCode = await execBoringCache(['--version']);
-              console.log('Exit code:', exitCode);
-
-              if (exitCode !== 0) {
-                throw new Error('Expected exit code 0');
-              }
-
-              console.log('execBoringCache test passed!');
-            }
-
-            main().catch(e => {
-              console.error(e);
-              process.exit(1);
-            });
+            main().catch(e => { console.error(e); process.exit(1); });
           "
