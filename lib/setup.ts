@@ -283,20 +283,36 @@ export async function ensureBoringCache(options: SetupOptions): Promise<void> {
   }
 
   let toolPath: string;
-  const cachedPath = tc.find(TOOL_NAME, normalizedVersion.replace(/^v/, ''));
+  let cachedPath = tc.find(TOOL_NAME, normalizedVersion.replace(/^v/, ''));
+
+  if (cachedPath && enableVerify) {
+    const binaryName = platform.isWindows ? 'boringcache.exe' : 'boringcache';
+    const cachedBinary = path.join(cachedPath, binaryName);
+    if (fs.existsSync(cachedBinary)) {
+      try {
+        const expectedChecksum = await getExpectedChecksum(normalizedVersion, platform.assetName);
+        const actualChecksum = await computeFileHash(cachedBinary);
+        if (actualChecksum !== expectedChecksum) {
+          core.warning(`Cached CLI binary is stale (checksum mismatch), re-downloading`);
+          cachedPath = '';
+        }
+      } catch (error) {
+        core.debug(`Cache validation failed: ${error instanceof Error ? error.message : error}`);
+      }
+    }
+  }
+
   if (cachedPath) {
     core.info(`Using cached BoringCache CLI`);
     toolPath = cachedPath;
   } else {
     toolPath = await downloadAndInstall(normalizedVersion, platform, enableVerify);
 
-    // Save to actions/cache for future workflow runs
-    if (enableCache && !restoredFromCache) {
+    if (enableCache) {
       try {
         await cache.saveCache(cachePaths, cacheInfo.cacheKey);
         core.info(`Saved CLI to cache (key: ${cacheInfo.cacheKey})`);
       } catch (error) {
-        // Cache save can fail if key already exists (race condition) - that's ok
         core.debug(`Cache save failed: ${error instanceof Error ? error.message : error}`);
       }
     }
