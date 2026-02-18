@@ -66,7 +66,7 @@ describe('action-core', () => {
     it('returns true when CLI is available', async () => {
       mockedExec.exec.mockImplementation(async (cmd, args, options) => {
         if (options?.listeners?.stdout) {
-          options.listeners.stdout(Buffer.from('boringcache v1.0.1'));
+          options.listeners.stdout(Buffer.from('boringcache v1.0.2'));
         }
         return 0;
       });
@@ -94,7 +94,7 @@ describe('action-core', () => {
     it('skips setup when version is "skip" and CLI is available', async () => {
       mockedExec.exec.mockImplementation(async (cmd, args, options) => {
         if (options?.listeners?.stdout) {
-          options.listeners.stdout(Buffer.from('boringcache v1.0.1'));
+          options.listeners.stdout(Buffer.from('boringcache v1.0.2'));
         }
         return 0;
       });
@@ -116,12 +116,12 @@ describe('action-core', () => {
     it('skips download when CLI is already available', async () => {
       mockedExec.exec.mockImplementation(async (cmd, args, options) => {
         if (options?.listeners?.stdout) {
-          options.listeners.stdout(Buffer.from('boringcache v1.0.1'));
+          options.listeners.stdout(Buffer.from('boringcache v1.0.2'));
         }
         return 0;
       });
 
-      await ensureBoringCache({ version: 'v1.0.1' });
+      await ensureBoringCache({ version: 'v1.0.2' });
 
       expect(mockedCore.debug).toHaveBeenCalledWith('BoringCache CLI already available');
       expect(mockedTc.downloadTool).not.toHaveBeenCalled();
@@ -145,14 +145,14 @@ describe('action-core', () => {
       process.env.RUNNER_OS = 'Linux';
       process.env.RUNNER_ARCH = 'X64';
 
-      await ensureBoringCache({ version: 'v1.0.1' });
+      await ensureBoringCache({ version: 'v1.0.2' });
 
       // Should download both binary and checksums
       expect(mockedTc.downloadTool).toHaveBeenCalledWith(
-        'https://github.com/boringcache/cli/releases/download/v1.0.1/boringcache-linux-amd64'
+        'https://github.com/boringcache/cli/releases/download/v1.0.2/boringcache-linux-amd64'
       );
       expect(mockedTc.downloadTool).toHaveBeenCalledWith(
-        'https://github.com/boringcache/cli/releases/download/v1.0.1/SHA256SUMS'
+        'https://github.com/boringcache/cli/releases/download/v1.0.2/SHA256SUMS'
       );
       expect(mockedCore.addPath).toHaveBeenCalledWith('/tmp/cached');
     });
@@ -164,9 +164,9 @@ describe('action-core', () => {
       process.env.RUNNER_OS = 'Linux';
       process.env.RUNNER_ARCH = 'X64';
 
-      await ensureBoringCache({ version: 'v1.0.1' });
+      await ensureBoringCache({ version: 'v1.0.2' });
 
-      expect(mockedTc.find).toHaveBeenCalledWith('boringcache', '1.0.1');
+      expect(mockedTc.find).toHaveBeenCalledWith('boringcache', '1.0.2');
       expect(mockedTc.downloadTool).not.toHaveBeenCalled();
       expect(mockedCore.addPath).toHaveBeenCalledWith('/tmp/cached-version');
     });
@@ -174,14 +174,14 @@ describe('action-core', () => {
     it('masks API token when provided', async () => {
       mockedExec.exec.mockImplementation(async (cmd, args, options) => {
         if (options?.listeners?.stdout) {
-          options.listeners.stdout(Buffer.from('boringcache v1.0.1'));
+          options.listeners.stdout(Buffer.from('boringcache v1.0.2'));
         }
         return 0;
       });
 
       process.env.BORINGCACHE_API_TOKEN = 'secret-token';
 
-      await ensureBoringCache({ version: 'v1.0.1' });
+      await ensureBoringCache({ version: 'v1.0.2' });
 
       expect(mockedCore.setSecret).toHaveBeenCalledWith('secret-token');
     });
@@ -214,11 +214,11 @@ describe('action-core', () => {
     });
 
     it('verifies checksum by default', async () => {
-      await ensureBoringCache({ version: 'v1.0.1' });
+      await ensureBoringCache({ version: 'v1.0.2' });
 
       // Should download SHA256SUMS
       expect(mockedTc.downloadTool).toHaveBeenCalledWith(
-        'https://github.com/boringcache/cli/releases/download/v1.0.1/SHA256SUMS'
+        'https://github.com/boringcache/cli/releases/download/v1.0.2/SHA256SUMS'
       );
       expect(mockedCore.info).toHaveBeenCalledWith(
         expect.stringContaining('Checksum verified')
@@ -226,7 +226,7 @@ describe('action-core', () => {
     });
 
     it('skips verification when verify: false', async () => {
-      await ensureBoringCache({ version: 'v1.0.1', verify: false });
+      await ensureBoringCache({ version: 'v1.0.2', verify: false });
 
       // Should only download binary, not checksums
       const downloadCalls = mockedTc.downloadTool.mock.calls;
@@ -247,7 +247,7 @@ describe('action-core', () => {
         return Promise.resolve(MOCK_BINARY_CONTENT);
       });
 
-      await expect(ensureBoringCache({ version: 'v1.0.1' })).rejects.toThrow(
+      await expect(ensureBoringCache({ version: 'v1.0.2' })).rejects.toThrow(
         'Checksum not found for asset: boringcache-linux-amd64'
       );
     });
@@ -257,7 +257,7 @@ describe('action-core', () => {
         .mockResolvedValueOnce('/tmp/binary') // binary download succeeds
         .mockRejectedValueOnce(new Error('404 Not Found')); // checksums fails
 
-      await expect(ensureBoringCache({ version: 'v1.0.1' })).rejects.toThrow(
+      await expect(ensureBoringCache({ version: 'v1.0.2' })).rejects.toThrow(
         'Failed to fetch checksums'
       );
     });
@@ -270,7 +270,7 @@ describe('action-core', () => {
         return Promise.resolve(MOCK_BINARY_CONTENT);
       });
 
-      await ensureBoringCache({ version: 'v1.0.1' });
+      await ensureBoringCache({ version: 'v1.0.2' });
 
       expect(mockedCore.info).toHaveBeenCalledWith(
         expect.stringContaining('Checksum verified')
@@ -285,7 +285,7 @@ describe('action-core', () => {
         return Promise.resolve(MOCK_BINARY_CONTENT);
       });
 
-      await ensureBoringCache({ version: 'v1.0.1' });
+      await ensureBoringCache({ version: 'v1.0.2' });
 
       expect(mockedCore.info).toHaveBeenCalledWith(
         expect.stringContaining('Checksum verified')
@@ -344,7 +344,7 @@ describe('action-core', () => {
       process.env.RUNNER_OS = 'Linux';
       process.env.RUNNER_ARCH = 'X64';
 
-      await ensureBoringCache({ version: 'v1.0.1' });
+      await ensureBoringCache({ version: 'v1.0.2' });
 
       expect(mockedTc.downloadTool).toHaveBeenCalledWith(
         expect.stringContaining('boringcache-linux-amd64')
@@ -355,7 +355,7 @@ describe('action-core', () => {
       process.env.RUNNER_OS = 'Linux';
       process.env.RUNNER_ARCH = 'ARM64';
 
-      await ensureBoringCache({ version: 'v1.0.1' });
+      await ensureBoringCache({ version: 'v1.0.2' });
 
       expect(mockedTc.downloadTool).toHaveBeenCalledWith(
         expect.stringContaining('boringcache-linux-arm64')
@@ -366,7 +366,7 @@ describe('action-core', () => {
       process.env.RUNNER_OS = 'macOS';
       process.env.RUNNER_ARCH = 'ARM64';
 
-      await ensureBoringCache({ version: 'v1.0.1' });
+      await ensureBoringCache({ version: 'v1.0.2' });
 
       expect(mockedTc.downloadTool).toHaveBeenCalledWith(
         expect.stringContaining('boringcache-macos-14-arm64')
@@ -377,7 +377,7 @@ describe('action-core', () => {
       process.env.RUNNER_OS = 'Windows';
       process.env.RUNNER_ARCH = 'X64';
 
-      await ensureBoringCache({ version: 'v1.0.1' });
+      await ensureBoringCache({ version: 'v1.0.2' });
 
       expect(mockedTc.downloadTool).toHaveBeenCalledWith(
         expect.stringContaining('boringcache-windows-2022-amd64.exe')
@@ -391,10 +391,10 @@ describe('action-core', () => {
       process.env.RUNNER_ARCH = 'X64';
       mockedTc.find.mockReturnValue('');
 
-      const info = getToolCacheInfo('v1.0.1');
+      const info = getToolCacheInfo('v1.0.2');
 
       expect(info.toolName).toBe('boringcache');
-      expect(info.version).toBe('1.0.1');
+      expect(info.version).toBe('1.0.2');
       expect(info.cachePath).toBeNull();
     });
 
@@ -411,11 +411,11 @@ describe('action-core', () => {
     it('returns cache path when tool is cached', () => {
       process.env.RUNNER_OS = 'Linux';
       process.env.RUNNER_ARCH = 'X64';
-      mockedTc.find.mockReturnValue('/opt/hostedtoolcache/boringcache/1.0.1/x64');
+      mockedTc.find.mockReturnValue('/opt/hostedtoolcache/boringcache/1.0.2/x64');
 
-      const info = getToolCacheInfo('v1.0.1');
+      const info = getToolCacheInfo('v1.0.2');
 
-      expect(info.cachePath).toBe('/opt/hostedtoolcache/boringcache/1.0.1/x64');
+      expect(info.cachePath).toBe('/opt/hostedtoolcache/boringcache/1.0.2/x64');
     });
 
     it('returns correct cache pattern', () => {
@@ -424,9 +424,9 @@ describe('action-core', () => {
       process.env.RUNNER_TOOL_CACHE = '/custom/tool/cache';
       mockedTc.find.mockReturnValue('');
 
-      const info = getToolCacheInfo('v1.0.1');
+      const info = getToolCacheInfo('v1.0.2');
 
-      expect(info.cachePattern).toBe('/custom/tool/cache/boringcache/1.0.1*');
+      expect(info.cachePattern).toBe('/custom/tool/cache/boringcache/1.0.2*');
     });
 
     it('returns platform-specific cache key', () => {
@@ -434,22 +434,22 @@ describe('action-core', () => {
       process.env.RUNNER_ARCH = 'ARM64';
       mockedTc.find.mockReturnValue('');
 
-      const info = getToolCacheInfo('v1.0.1');
+      const info = getToolCacheInfo('v1.0.2');
 
-      expect(info.cacheKey).toBe('boringcache-1.0.1-linux-arm64');
+      expect(info.cacheKey).toBe('boringcache-1.0.2-linux-arm64');
     });
   });
 
   describe('automatic caching', () => {
     it('restores from actions/cache on startup', async () => {
       mockedExec.exec.mockRejectedValueOnce(new Error('not found'));
-      mockedCache.restoreCache.mockResolvedValue('boringcache-1.0.1-linux-x64');
-      mockedTc.find.mockReturnValue('/opt/hostedtoolcache/boringcache/1.0.1/x64');
+      mockedCache.restoreCache.mockResolvedValue('boringcache-1.0.2-linux-x64');
+      mockedTc.find.mockReturnValue('/opt/hostedtoolcache/boringcache/1.0.2/x64');
 
       process.env.RUNNER_OS = 'Linux';
       process.env.RUNNER_ARCH = 'X64';
 
-      await ensureBoringCache({ version: 'v1.0.1' });
+      await ensureBoringCache({ version: 'v1.0.2' });
 
       expect(mockedCache.restoreCache).toHaveBeenCalled();
       expect(mockedTc.downloadTool).not.toHaveBeenCalled();
@@ -465,11 +465,11 @@ describe('action-core', () => {
       process.env.RUNNER_OS = 'Linux';
       process.env.RUNNER_ARCH = 'X64';
 
-      await ensureBoringCache({ version: 'v1.0.1' });
+      await ensureBoringCache({ version: 'v1.0.2' });
 
       expect(mockedCache.saveCache).toHaveBeenCalledWith(
         expect.any(Array),
-        expect.stringContaining('boringcache-1.0.1-linux-x64')
+        expect.stringContaining('boringcache-1.0.2-linux-x64')
       );
     });
 
@@ -482,7 +482,7 @@ describe('action-core', () => {
       process.env.RUNNER_OS = 'Linux';
       process.env.RUNNER_ARCH = 'X64';
 
-      await ensureBoringCache({ version: 'v1.0.1', cache: false });
+      await ensureBoringCache({ version: 'v1.0.2', cache: false });
 
       expect(mockedCache.restoreCache).not.toHaveBeenCalled();
       expect(mockedCache.saveCache).not.toHaveBeenCalled();
@@ -499,7 +499,7 @@ describe('action-core', () => {
       process.env.RUNNER_ARCH = 'X64';
 
       // Should not throw, just continue with download
-      await ensureBoringCache({ version: 'v1.0.1' });
+      await ensureBoringCache({ version: 'v1.0.2' });
 
       expect(mockedTc.downloadTool).toHaveBeenCalled();
     });
@@ -516,7 +516,7 @@ describe('action-core', () => {
       process.env.RUNNER_ARCH = 'X64';
 
       // Should not throw
-      await ensureBoringCache({ version: 'v1.0.1' });
+      await ensureBoringCache({ version: 'v1.0.2' });
 
       expect(mockedCore.addPath).toHaveBeenCalled();
     });

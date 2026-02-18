@@ -16,7 +16,7 @@ npm install @boringcache/action-core
 import { ensureBoringCache, execBoringCache } from '@boringcache/action-core';
 
 // Ensure the CLI is installed
-await ensureBoringCache({ version: 'v1.0.1' });
+await ensureBoringCache({ version: 'v1.0.2' });
 
 // Execute CLI commands
 const exitCode = await execBoringCache(['restore', 'workspace', 'tag:path']);
@@ -29,7 +29,7 @@ const exitCode = await execBoringCache(['restore', 'workspace', 'tag:path']);
 Downloads and installs the BoringCache CLI if not already available.
 
 **Options:**
-- `version` (required): Version to install (e.g., `'v1.0.1'`). Set to `'skip'` to skip installation.
+- `version` (required): Version to install (e.g., `'v1.0.2'`). Set to `'skip'` to skip installation.
 - `token` (optional): API token (defaults to `BORINGCACHE_API_TOKEN` env var)
 - `cache` (optional): Enable automatic caching across workflow runs (default: `true`)
 
@@ -75,16 +75,16 @@ The CLI is **automatically cached** across workflow runs using `@actions/cache`.
 
 ```typescript
 // First workflow run: downloads CLI and saves to cache
-await ensureBoringCache({ version: 'v1.0.1' });
+await ensureBoringCache({ version: 'v1.0.2' });
 
 // Subsequent runs: restores from cache instantly
-await ensureBoringCache({ version: 'v1.0.1' });
+await ensureBoringCache({ version: 'v1.0.2' });
 ```
 
 To disable automatic caching:
 
 ```typescript
-await ensureBoringCache({ version: 'v1.0.1', cache: false });
+await ensureBoringCache({ version: 'v1.0.2', cache: false });
 ```
 
 ### Manual Cache Control
@@ -95,7 +95,7 @@ For advanced use cases, you can use `getToolCacheInfo()` to manage caching yours
 import * as cache from '@actions/cache';
 import { ensureBoringCache, getToolCacheInfo } from '@boringcache/action-core';
 
-const info = getToolCacheInfo('v1.0.1');
+const info = getToolCacheInfo('v1.0.2');
 console.log(info.cacheKey);     // 'boringcache-1.0.0-linux-x64'
 console.log(info.cachePattern); // '/opt/hostedtoolcache/boringcache/1.0.0*'
 console.log(info.cachePath);    // Path if cached, null otherwise
