@@ -14,12 +14,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/boringcache/actions.git",
-    "directory": "action-core"
+    "url": "git+https://github.com/boringcache/action-core.git"
   },
-  "homepage": "https://github.com/boringcache/actions/tree/main/action-core#readme",
+  "homepage": "https://github.com/boringcache/action-core#readme",
   "bugs": {
-    "url": "https://github.com/boringcache/actions/issues"
+    "url": "https://github.com/boringcache/action-core/issues"
   },
   "keywords": [
     "boringcache",
