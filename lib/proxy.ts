@@ -25,6 +25,26 @@ export interface ProxyHandle {
 const PROXY_LOG_FILE = path.join(os.tmpdir(), 'boringcache-proxy.log');
 const PROXY_PID_FILE = path.join(os.tmpdir(), 'boringcache-proxy.pid');
 
+export function normalizeProxyTags(tagInput: string): string {
+  const tags: string[] = [];
+  const seen = new Set<string>();
+
+  for (const rawTag of tagInput.split(',')) {
+    const tag = rawTag.trim();
+    if (!tag || seen.has(tag)) {
+      continue;
+    }
+    seen.add(tag);
+    tags.push(tag);
+  }
+
+  if (tags.length === 0) {
+    throw new Error('At least one proxy tag is required');
+  }
+
+  return tags.join(',');
+}
+
 function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -66,6 +86,9 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
   }
 
   const host = options.host || '127.0.0.1';
+  const normalizedTags = normalizeProxyTags(options.tag);
+  const tagList = normalizedTags.split(',');
+  const primaryTag = tagList[0];
 
   if (await isProxyRunning(options.port)) {
     core.info(`Registry proxy already running on port ${options.port}, reusing`);
@@ -76,7 +99,7 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
     return { pid: -1, port: options.port };
   }
 
-  const args = [options.command, options.workspace, options.tag];
+  const args = [options.command, options.workspace, normalizedTags];
   if (options.noGit) {
     args.push('--no-git');
   }
@@ -89,6 +112,10 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
   }
 
   core.info(`Starting registry proxy on ${host}:${options.port}...`);
+  core.info(`Registry proxy primary tag: ${primaryTag}`);
+  if (tagList.length > 1) {
+    core.info(`Registry proxy alias tags: ${tagList.slice(1).join(', ')}`);
+  }
 
   const logFile = path.join(os.tmpdir(), `boringcache-proxy-${options.port}.log`);
   const logFd = fs.openSync(logFile, 'w');
