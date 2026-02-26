@@ -1,6 +1,6 @@
 {
   "name": "@boringcache/action-core",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Shared core library for BoringCache GitHub Actions",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
