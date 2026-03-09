@@ -175,30 +175,45 @@ export async function waitForProxy(port: number, timeoutMs = 20000, pid?: number
 }
 
 /**
- * Graceful stop: SIGTERM, wait 2s, SIGKILL if still alive.
+ * Graceful stop: send SIGTERM and wait for the proxy to exit on its own.
+ * The proxy handles SIGTERM by flushing all pending blobs to the backend,
+ * then exits. Never send SIGKILL — the proxy owns its own shutdown timing.
  */
 export async function stopRegistryProxy(pid: number): Promise<void> {
   if (pid <= 0) {
     core.info('No proxy PID to stop (was reused from another invocation)');
     return;
   }
+
   core.info(`Stopping registry proxy (PID: ${pid})...`);
+
   try {
     process.kill(pid, 'SIGTERM');
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    try {
-      process.kill(pid, 0);
-      process.kill(pid, 'SIGKILL');
-    } catch {
-    }
-    core.info('Registry proxy stopped');
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ESRCH') {
       core.info(`Registry proxy (PID: ${pid}) already exited`);
-    } else {
-      core.warning(`Failed to stop registry proxy: ${(err as Error).message}`);
+      return;
     }
+    core.warning(`Failed to send SIGTERM to registry proxy: ${(err as Error).message}`);
+    return;
+  }
+
+  const start = Date.now();
+  const pollInterval = 1000;
+  const logInterval = 30_000;
+  let lastLog = start;
+  while (true) {
+    if (!isProcessAlive(pid)) {
+      core.info(`Registry proxy exited gracefully after ${Math.round((Date.now() - start) / 1000)}s`);
+      return;
+    }
+    const now = Date.now();
+    if (now - lastLog >= logInterval) {
+      core.info(`Waiting for registry proxy to flush and exit... (${Math.round((now - start) / 1000)}s elapsed)`);
+      lastLog = now;
+    }
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
   }
 }
 
