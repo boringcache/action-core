@@ -22,7 +22,6 @@ export interface ProxyHandle {
   port: number;
 }
 
-const PROXY_LOG_FILE = path.join(os.tmpdir(), 'boringcache-proxy.log');
 const PROXY_PID_FILE = path.join(os.tmpdir(), 'boringcache-proxy.pid');
 
 export function normalizeProxyTags(tagInput: string): string {
@@ -54,9 +53,13 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-function readProxyLogs(): string {
+function proxyLogPath(port: number): string {
+  return path.join(os.tmpdir(), `boringcache-proxy-${port}.log`);
+}
+
+function readProxyLogs(port: number): string {
   try {
-    return fs.readFileSync(PROXY_LOG_FILE, 'utf-8').trim();
+    return fs.readFileSync(proxyLogPath(port), 'utf-8').trim();
   } catch {
     return '';
   }
@@ -117,7 +120,7 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
     core.info(`Registry proxy alias tags: ${tagList.slice(1).join(', ')}`);
   }
 
-  const logFile = path.join(os.tmpdir(), `boringcache-proxy-${options.port}.log`);
+  const logFile = proxyLogPath(options.port);
   const logFd = fs.openSync(logFile, 'w');
   const child: ChildProcess = spawn('boringcache', args, {
     detached: true,
@@ -147,7 +150,7 @@ export async function waitForProxy(port: number, timeoutMs = 300000, pid?: numbe
 
   while (Date.now() - start < timeoutMs) {
     if (pid && pid > 0 && !isProcessAlive(pid)) {
-      const logs = readProxyLogs();
+      const logs = readProxyLogs(port);
       throw new Error(`Registry proxy exited before becoming ready${logs ? `:\n${logs}` : ''}`);
     }
 
@@ -179,7 +182,7 @@ export async function waitForProxy(port: number, timeoutMs = 300000, pid?: numbe
     await new Promise(resolve => setTimeout(resolve, interval));
   }
 
-  const logs = readProxyLogs();
+  const logs = readProxyLogs(port);
   throw new Error(`Registry proxy did not become ready within ${timeoutMs}ms${logs ? `:\n${logs}` : ''}`);
 }
 
