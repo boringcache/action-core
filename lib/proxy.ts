@@ -140,9 +140,10 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
 /**
  * Poll /v2/ until proxy is ready. Checks that the process is still alive.
  */
-export async function waitForProxy(port: number, timeoutMs = 20000, pid?: number): Promise<void> {
+export async function waitForProxy(port: number, timeoutMs = 300000, pid?: number): Promise<void> {
   const start = Date.now();
   const interval = 500;
+  let lastLogAt = 0;
 
   while (Date.now() - start < timeoutMs) {
     if (pid && pid > 0 && !isProcessAlive(pid)) {
@@ -162,11 +163,19 @@ export async function waitForProxy(port: number, timeoutMs = 20000, pid?: number
         });
       });
       if (ok) {
-        core.info('Registry proxy is ready');
+        const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+        core.info(`Registry proxy is ready (${elapsed}s)`);
         return;
       }
     } catch {
     }
+
+    const elapsed = Date.now() - start;
+    if (elapsed - lastLogAt >= 10000) {
+      core.info(`Waiting for proxy readiness... (${(elapsed / 1000).toFixed(0)}s)`);
+      lastLogAt = elapsed;
+    }
+
     await new Promise(resolve => setTimeout(resolve, interval));
   }
 
