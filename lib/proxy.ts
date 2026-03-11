@@ -5,6 +5,12 @@ import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn, ChildProcess } from 'child_process';
+import {
+  getAuthTokens,
+  missingRestoreTokenMessage,
+  missingSaveTokenMessage,
+  warnIfUsingLegacyApiToken,
+} from './auth';
 
 export interface ProxyOptions {
   command: 'cache-registry' | 'docker-registry';
@@ -15,11 +21,13 @@ export interface ProxyOptions {
   noGit?: boolean;
   noPlatform?: boolean;
   verbose?: boolean;
+  readOnly?: boolean;
 }
 
 export interface ProxyHandle {
   pid: number;
   port: number;
+  readOnly: boolean;
 }
 
 const PROXY_PID_FILE = path.join(os.tmpdir(), 'boringcache-proxy.pid');
@@ -84,8 +92,25 @@ async function isProxyRunning(port: number): Promise<boolean> {
  * Spawns a detached boringcache process, writes PID file, returns handle.
  */
 export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHandle> {
-  if (!process.env.BORINGCACHE_API_TOKEN) {
-    throw new Error('BORINGCACHE_API_TOKEN is required for registry proxy mode');
+  warnIfUsingLegacyApiToken();
+  const { restoreToken, saveToken } = getAuthTokens();
+
+  let effectiveReadOnly = options.readOnly === true;
+  let authToken = effectiveReadOnly ? restoreToken : saveToken;
+
+  if (!authToken && !effectiveReadOnly && options.command === 'cache-registry' && restoreToken) {
+    effectiveReadOnly = true;
+    authToken = restoreToken;
+    core.info(
+      'No save-capable token configured; starting cache-registry in read-only mode with BORINGCACHE_RESTORE_TOKEN'
+    );
+  }
+
+  if (!authToken) {
+    if (effectiveReadOnly) {
+      throw new Error(`${missingRestoreTokenMessage()} This is required for registry proxy mode.`);
+    }
+    throw new Error(`${missingSaveTokenMessage()} This is required for registry proxy mode.`);
   }
 
   const host = options.host || '127.0.0.1';
@@ -97,9 +122,9 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
     core.info(`Registry proxy already running on port ${options.port}, reusing`);
     try {
       const pid = parseInt(fs.readFileSync(PROXY_PID_FILE, 'utf-8').trim(), 10);
-      if (pid > 0) return { pid, port: options.port };
+      if (pid > 0) return { pid, port: options.port, readOnly: effectiveReadOnly };
     } catch {}
-    return { pid: -1, port: options.port };
+    return { pid: -1, port: options.port, readOnly: effectiveReadOnly };
   }
 
   const args = [options.command, options.workspace, normalizedTags];
@@ -110,6 +135,9 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
     args.push('--no-platform');
   }
   args.push('--host', host, '--port', String(options.port));
+  if (effectiveReadOnly) {
+    args.push('--read-only');
+  }
   if (options.verbose) {
     args.push('--verbose');
   }
@@ -119,13 +147,19 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
   if (tagList.length > 1) {
     core.info(`Registry proxy alias tags: ${tagList.slice(1).join(', ')}`);
   }
+  if (effectiveReadOnly) {
+    core.info('Registry proxy mode: read-only');
+  }
 
   const logFile = proxyLogPath(options.port);
   const logFd = fs.openSync(logFile, 'w');
   const child: ChildProcess = spawn('boringcache', args, {
     detached: true,
     stdio: ['ignore', logFd, logFd],
-    env: process.env
+    env: {
+      ...process.env,
+      BORINGCACHE_API_TOKEN: authToken,
+    }
   });
 
   child.unref();
@@ -137,7 +171,7 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
 
   fs.writeFileSync(PROXY_PID_FILE, String(child.pid));
   core.info(`Registry proxy started (PID: ${child.pid})`);
-  return { pid: child.pid, port: options.port };
+  return { pid: child.pid, port: options.port, readOnly: effectiveReadOnly };
 }
 
 /**

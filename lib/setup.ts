@@ -6,6 +6,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { warnIfUsingLegacyApiToken } from './auth';
 
 const TOOL_NAME = 'boringcache';
 const GITHUB_RELEASES_BASE = 'https://github.com/boringcache/cli/releases/download';
@@ -237,9 +238,19 @@ export async function isCliAvailable(): Promise<boolean> {
 }
 
 export async function ensureBoringCache(options: SetupOptions): Promise<void> {
-  const token = options.token || process.env.BORINGCACHE_API_TOKEN;
-  if (token) {
-    core.setSecret(token);
+  warnIfUsingLegacyApiToken();
+
+  const secrets = new Set(
+    [
+      options.token,
+      process.env.BORINGCACHE_RESTORE_TOKEN,
+      process.env.BORINGCACHE_SAVE_TOKEN,
+      process.env.BORINGCACHE_API_TOKEN,
+    ].filter((value): value is string => Boolean(value))
+  );
+
+  for (const secret of secrets) {
+    core.setSecret(secret);
   }
 
   if (options.version === 'skip') {

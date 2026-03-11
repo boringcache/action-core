@@ -47,6 +47,8 @@ describe('action-core', () => {
     delete process.env.RUNNER_OS;
     delete process.env.RUNNER_ARCH;
     delete process.env.BORINGCACHE_API_TOKEN;
+    delete process.env.BORINGCACHE_RESTORE_TOKEN;
+    delete process.env.BORINGCACHE_SAVE_TOKEN;
     delete process.env.RUNNER_TOOL_CACHE;
     // Default cache mocks
     mockedCache.restoreCache.mockResolvedValue(undefined);
@@ -184,6 +186,23 @@ describe('action-core', () => {
       await ensureBoringCache({ version: 'v1.12.1' });
 
       expect(mockedCore.setSecret).toHaveBeenCalledWith('secret-token');
+    });
+
+    it('masks restore and save tokens from the environment', async () => {
+      mockedExec.exec.mockImplementation(async (cmd, args, options) => {
+        if (options?.listeners?.stdout) {
+          options.listeners.stdout(Buffer.from('boringcache v1.12.1'));
+        }
+        return 0;
+      });
+
+      process.env.BORINGCACHE_RESTORE_TOKEN = 'restore-secret';
+      process.env.BORINGCACHE_SAVE_TOKEN = 'save-secret';
+
+      await ensureBoringCache({ version: 'v1.12.1' });
+
+      expect(mockedCore.setSecret).toHaveBeenCalledWith('restore-secret');
+      expect(mockedCore.setSecret).toHaveBeenCalledWith('save-secret');
     });
 
     it('normalizes version without v prefix', async () => {

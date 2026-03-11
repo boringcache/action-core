@@ -8,6 +8,17 @@ export {
 } from './setup';
 
 export {
+  getAuthTokens,
+  hasRestoreToken,
+  hasSaveToken,
+  isUsingLegacyApiTokenOnly,
+  warnIfUsingLegacyApiToken,
+  missingRestoreTokenMessage,
+  missingSaveTokenMessage,
+  AuthTokens,
+} from './auth';
+
+export {
   getWorkspace,
   getCacheTagPrefix,
   pathExists,

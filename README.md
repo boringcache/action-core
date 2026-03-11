@@ -4,6 +4,8 @@
 
 Shared core library for BoringCache GitHub Actions. This package provides the common functionality used by all BoringCache actions to download, install, and execute the BoringCache CLI.
 
+For new integrations, prefer split auth with `BORINGCACHE_RESTORE_TOKEN` and `BORINGCACHE_SAVE_TOKEN`. `BORINGCACHE_API_TOKEN` remains a compatibility fallback for older workflows.
+
 ## Installation
 
 ```bash
@@ -30,7 +32,7 @@ Downloads and installs the BoringCache CLI if not already available.
 
 **Options:**
 - `version` (required): Version to install (e.g., `'v1.0.2'`). Set to `'skip'` to skip installation.
-- `token` (optional): API token (defaults to `BORINGCACHE_API_TOKEN` env var)
+- `token` (optional): Legacy compatibility token. Prefer split-token env vars for new actions and workflows.
 - `cache` (optional): Enable automatic caching across workflow runs (default: `true`)
 
 **Features:**
@@ -38,7 +40,7 @@ Downloads and installs the BoringCache CLI if not already available.
 - **Automatic caching** - CLI is cached across workflow runs using `@actions/cache`
 - Uses GitHub Actions tool cache for fast subsequent jobs
 - Handles Windows bash fallback
-- Masks API token in logs
+- Masks configured auth tokens in logs
 
 ### `execBoringCache(args: string[], options?: ExecOptions): Promise<number>`
 
@@ -133,10 +135,30 @@ console.log(info.cachePath);    // Path if cached, null otherwise
 
 ## Environment Variables
 
-- `BORINGCACHE_API_TOKEN`: API token for authentication
+- `BORINGCACHE_RESTORE_TOKEN`: Preferred token for restore/read operations
+- `BORINGCACHE_SAVE_TOKEN`: Preferred token for save/write operations
+- `BORINGCACHE_API_TOKEN`: Legacy compatibility token used as a fallback
 - `RUNNER_OS`: GitHub Actions runner OS (auto-detected)
 - `RUNNER_ARCH`: GitHub Actions runner architecture (auto-detected)
 - `RUNNER_TOOL_CACHE`: Tool cache directory (auto-detected)
+
+## Auth Helpers
+
+`@boringcache/action-core` exposes helpers for action authors who want capability-aware behavior:
+
+- `getAuthTokens()`
+- `hasRestoreToken()`
+- `hasSaveToken()`
+- `isUsingLegacyApiTokenOnly()`
+- `warnIfUsingLegacyApiToken()`
+
+## Recommended Action Behavior
+
+- Treat `BORINGCACHE_RESTORE_TOKEN` and `BORINGCACHE_SAVE_TOKEN` as the primary auth model.
+- Accept `BORINGCACHE_API_TOKEN` only as a compatibility fallback.
+- Combined restore/save actions should restore normally and skip save with a clear notice when no save-capable token is configured.
+- Save-only actions should fail fast when only a restore-capable token is present.
+- Proxy actions should auto-downgrade to read-only when only a restore-capable token is configured and the backend supports it.
 
 ## Supported Platforms
 
