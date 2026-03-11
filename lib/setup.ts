@@ -18,6 +18,8 @@ export interface SetupOptions {
   cache?: boolean;
   /** Verify SHA256 checksum of downloaded binary (default: true) */
   verify?: boolean;
+  /** Export BORINGCACHE_REQUIRE_SERVER_SIGNATURE=1 unless already configured */
+  requireServerSignature?: boolean;
 }
 
 export interface ToolCacheInfo {
@@ -251,6 +253,12 @@ export async function ensureBoringCache(options: SetupOptions): Promise<void> {
 
   for (const secret of secrets) {
     core.setSecret(secret);
+  }
+
+  const shouldRequireServerSignature = options.requireServerSignature !== false;
+  if (shouldRequireServerSignature && !process.env.BORINGCACHE_REQUIRE_SERVER_SIGNATURE) {
+    core.exportVariable('BORINGCACHE_REQUIRE_SERVER_SIGNATURE', '1');
+    core.info('BORINGCACHE_REQUIRE_SERVER_SIGNATURE=1 (strict server signature verification enabled)');
   }
 
   if (options.version === 'skip') {

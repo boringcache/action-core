@@ -49,6 +49,7 @@ describe('action-core', () => {
     delete process.env.BORINGCACHE_API_TOKEN;
     delete process.env.BORINGCACHE_RESTORE_TOKEN;
     delete process.env.BORINGCACHE_SAVE_TOKEN;
+    delete process.env.BORINGCACHE_REQUIRE_SERVER_SIGNATURE;
     delete process.env.RUNNER_TOOL_CACHE;
     // Default cache mocks
     mockedCache.restoreCache.mockResolvedValue(undefined);
@@ -203,6 +204,39 @@ describe('action-core', () => {
 
       expect(mockedCore.setSecret).toHaveBeenCalledWith('restore-secret');
       expect(mockedCore.setSecret).toHaveBeenCalledWith('save-secret');
+    });
+
+    it('exports strict signature verification by default', async () => {
+      mockedExec.exec.mockImplementation(async (cmd, args, options) => {
+        if (options?.listeners?.stdout) {
+          options.listeners.stdout(Buffer.from('boringcache v1.12.2'));
+        }
+        return 0;
+      });
+
+      await ensureBoringCache({ version: 'v1.12.2' });
+
+      expect(mockedCore.exportVariable).toHaveBeenCalledWith(
+        'BORINGCACHE_REQUIRE_SERVER_SIGNATURE',
+        '1'
+      );
+    });
+
+    it('respects an existing strict signature env override', async () => {
+      mockedExec.exec.mockImplementation(async (cmd, args, options) => {
+        if (options?.listeners?.stdout) {
+          options.listeners.stdout(Buffer.from('boringcache v1.12.2'));
+        }
+        return 0;
+      });
+      process.env.BORINGCACHE_REQUIRE_SERVER_SIGNATURE = '0';
+
+      await ensureBoringCache({ version: 'v1.12.2' });
+
+      expect(mockedCore.exportVariable).not.toHaveBeenCalledWith(
+        'BORINGCACHE_REQUIRE_SERVER_SIGNATURE',
+        '1'
+      );
     });
 
     it('normalizes version without v prefix', async () => {
