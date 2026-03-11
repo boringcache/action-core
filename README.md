@@ -1,173 +1,32 @@
 # @boringcache/action-core
 
-**Cache once. Reuse everywhere.**
+Shared helpers used by BoringCache GitHub Actions.
 
-Shared core library for BoringCache GitHub Actions. This package provides the common functionality used by all BoringCache actions to download, install, and execute the BoringCache CLI.
+This package is for action authors and internal integrations. If you are setting up a workflow, start with the public docs or one of the published actions instead.
 
-For new integrations, prefer split auth with `BORINGCACHE_RESTORE_TOKEN` and `BORINGCACHE_SAVE_TOKEN`. `BORINGCACHE_API_TOKEN` remains a compatibility fallback for older workflows.
-
-## Installation
+## Install
 
 ```bash
 npm install @boringcache/action-core
 ```
 
-## Usage
+## Main helpers
 
-```typescript
-import { ensureBoringCache, execBoringCache } from '@boringcache/action-core';
+- `ensureBoringCache(options)`: install or reuse the CLI on the runner.
+- `execBoringCache(args, options)`: run the CLI from an action.
+- `getAuthTokens()`: read the configured restore/save/legacy tokens.
+- `hasRestoreToken()` / `hasSaveToken()`: capability-aware checks for action logic.
+- `warnIfUsingLegacyApiToken()`: compatibility warning for old workflows.
 
-// Ensure the CLI is installed
-await ensureBoringCache({ version: 'v1.0.2' });
+## Auth model
 
-// Execute CLI commands
-const exitCode = await execBoringCache(['restore', 'workspace', 'tag:path']);
-```
+- Restore flows prefer `BORINGCACHE_RESTORE_TOKEN`, then `BORINGCACHE_SAVE_TOKEN`, then `BORINGCACHE_API_TOKEN`.
+- Save flows prefer `BORINGCACHE_SAVE_TOKEN`, then `BORINGCACHE_API_TOKEN`.
+- Combined restore/save actions should skip save cleanly when no save-capable token is configured.
+- Proxy-backed actions should downgrade to read-only when only a restore-capable token is available and the backend supports it.
+- `BORINGCACHE_API_TOKEN` is a legacy fallback, not the preferred path for new workflows.
 
-## API
+## Docs
 
-### `ensureBoringCache(options: SetupOptions): Promise<void>`
-
-Downloads and installs the BoringCache CLI if not already available.
-
-**Options:**
-- `version` (required): Version to install (e.g., `'v1.0.2'`). Set to `'skip'` to skip installation.
-- `token` (optional): Legacy compatibility token. Prefer split-token env vars for new actions and workflows.
-- `cache` (optional): Enable automatic caching across workflow runs (default: `true`)
-
-**Features:**
-- Automatic platform detection (Linux, macOS, Windows)
-- **Automatic caching** - CLI is cached across workflow runs using `@actions/cache`
-- Uses GitHub Actions tool cache for fast subsequent jobs
-- Handles Windows bash fallback
-- Masks configured auth tokens in logs
-
-### `execBoringCache(args: string[], options?: ExecOptions): Promise<number>`
-
-Executes the BoringCache CLI with the given arguments.
-
-**Parameters:**
-- `args`: Command line arguments to pass to the CLI
-- `options`: Optional exec options (from `@actions/exec`)
-
-**Returns:** Exit code from the command
-
-### `isCliAvailable(): Promise<boolean>`
-
-Checks if the BoringCache CLI is available on the PATH.
-
-### `getToolCacheInfo(version: string): ToolCacheInfo`
-
-Get tool cache information for persisting the CLI across workflow runs.
-
-**Returns:**
-```typescript
-interface ToolCacheInfo {
-  toolName: string;      // 'boringcache'
-  version: string;       // Normalized version (e.g., '1.0.0')
-  cachePath: string | null;  // Path if cached, null otherwise
-  cachePattern: string;  // Glob pattern for actions/cache
-  cacheKey: string;      // Cache key for actions/cache
-}
-```
-
-## Automatic Caching
-
-The CLI is **automatically cached** across workflow runs using `@actions/cache`. No extra configuration needed!
-
-```typescript
-// First workflow run: downloads CLI and saves to cache
-await ensureBoringCache({ version: 'v1.0.2' });
-
-// Subsequent runs: restores from cache instantly
-await ensureBoringCache({ version: 'v1.0.2' });
-```
-
-To disable automatic caching:
-
-```typescript
-await ensureBoringCache({ version: 'v1.0.2', cache: false });
-```
-
-### Manual Cache Control
-
-For advanced use cases, you can use `getToolCacheInfo()` to manage caching yourself:
-
-```typescript
-import * as cache from '@actions/cache';
-import { ensureBoringCache, getToolCacheInfo } from '@boringcache/action-core';
-
-const info = getToolCacheInfo('v1.0.2');
-console.log(info.cacheKey);     // 'boringcache-1.0.0-linux-x64'
-console.log(info.cachePattern); // '/opt/hostedtoolcache/boringcache/1.0.0*'
-console.log(info.cachePath);    // Path if cached, null otherwise
-```
-
-## How Tool Cache Works
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ First Run (no cache)                                            │
-├─────────────────────────────────────────────────────────────────┤
-│ 1. tc.find('boringcache', '1.0.0') → null                       │
-│ 2. tc.downloadTool(url) → /tmp/downloaded-binary                │
-│ 3. tc.cacheDir(dir, 'boringcache', '1.0.0')                     │
-│    → $RUNNER_TOOL_CACHE/boringcache/1.0.0/x64/                  │
-│ 4. core.addPath(cachedPath)                                     │
-└─────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────┐
-│ Subsequent Run (same job/workflow)                              │
-├─────────────────────────────────────────────────────────────────┤
-│ 1. tc.find('boringcache', '1.0.0')                              │
-│    → $RUNNER_TOOL_CACHE/boringcache/1.0.0/x64/                  │
-│ 2. core.addPath(cachedPath) ✓ (no download needed)              │
-└─────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────┐
-│ With actions/cache (persists across workflow runs)              │
-├─────────────────────────────────────────────────────────────────┤
-│ 1. actions/cache restores $RUNNER_TOOL_CACHE/boringcache        │
-│ 2. tc.find('boringcache', '1.0.0') → cached path ✓              │
-│ 3. No download needed on any run!                               │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-## Environment Variables
-
-- `BORINGCACHE_RESTORE_TOKEN`: Preferred token for restore/read operations
-- `BORINGCACHE_SAVE_TOKEN`: Preferred token for save/write operations
-- `BORINGCACHE_API_TOKEN`: Legacy compatibility token used as a fallback
-- `RUNNER_OS`: GitHub Actions runner OS (auto-detected)
-- `RUNNER_ARCH`: GitHub Actions runner architecture (auto-detected)
-- `RUNNER_TOOL_CACHE`: Tool cache directory (auto-detected)
-
-## Auth Helpers
-
-`@boringcache/action-core` exposes helpers for action authors who want capability-aware behavior:
-
-- `getAuthTokens()`
-- `hasRestoreToken()`
-- `hasSaveToken()`
-- `isUsingLegacyApiTokenOnly()`
-- `warnIfUsingLegacyApiToken()`
-
-## Recommended Action Behavior
-
-- Treat `BORINGCACHE_RESTORE_TOKEN` and `BORINGCACHE_SAVE_TOKEN` as the primary auth model.
-- Accept `BORINGCACHE_API_TOKEN` only as a compatibility fallback.
-- Combined restore/save actions should restore normally and skip save with a clear notice when no save-capable token is configured.
-- Save-only actions should fail fast when only a restore-capable token is present.
-- Proxy actions should auto-downgrade to read-only when only a restore-capable token is configured and the backend supports it.
-
-## Supported Platforms
-
-| OS      | Architecture |
-|---------|-------------|
-| Linux   | x64, ARM64  |
-| macOS   | ARM64       |
-| Windows | x64         |
-
-## License
-
-MIT
+- [GitHub Actions docs](https://boringcache.com/docs#action)
+- [GitHub Actions auth and trust model](https://boringcache.com/docs#actions-auth)
