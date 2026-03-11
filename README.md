@@ -4,13 +4,17 @@ Shared helpers used by BoringCache GitHub Actions.
 
 This package is for action authors and internal integrations. If you are setting up a workflow, start with the public docs or one of the published actions instead.
 
+## When to use it
+
+Use this package when you are writing or maintaining a BoringCache action and need shared CLI install, auth, proxy, and compatibility helpers.
+
 ## Install
 
 ```bash
 npm install @boringcache/action-core
 ```
 
-## Main helpers
+## What it provides
 
 - `ensureBoringCache(options)`: install or reuse the CLI on the runner.
 - `execBoringCache(args, options)`: run the CLI from an action.
@@ -26,7 +30,7 @@ npm install @boringcache/action-core
 - Proxy-backed actions should downgrade to read-only when only a restore-capable token is available and the backend supports it.
 - `BORINGCACHE_API_TOKEN` is a legacy fallback, not the preferred path for new workflows.
 
-## Docs
+## Learn more
 
 - [GitHub Actions docs](https://boringcache.com/docs#action)
 - [GitHub Actions auth and trust model](https://boringcache.com/docs#actions-auth)
