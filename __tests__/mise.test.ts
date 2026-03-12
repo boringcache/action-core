@@ -158,7 +158,13 @@ describe('mise helpers', () => {
       'mise-2026.3.8-linux-x64',
     );
     expect(mockedTc.cacheDir).toHaveBeenCalled();
+    expect(mockedFs.promises.copyFile).toHaveBeenCalledWith(
+      expect.stringContaining('/tmp/mise-tool-cache/mise'),
+      getMiseBinPath(),
+    );
+    expect(mockedFs.promises.chmod).toHaveBeenCalledWith(getMiseBinPath(), 0o755);
     expect(mockedCore.addPath).toHaveBeenCalledWith('/tmp/mise-tool-cache');
+    expect(mockedCore.addPath).toHaveBeenCalledWith(path.dirname(getMiseBinPath()));
     expect(mockedCore.addPath).toHaveBeenCalledWith(getMiseShimsDir());
   });
 
@@ -173,6 +179,7 @@ describe('mise helpers', () => {
 
     expect(mockedTc.downloadTool).not.toHaveBeenCalled();
     expect(mockedCache.saveCache).not.toHaveBeenCalled();
+    expect(mockedFs.promises.copyFile).toHaveBeenCalledWith('/tmp/cached-mise/mise', getMiseBinPath());
     expect(mockedCore.addPath).toHaveBeenCalledWith('/tmp/cached-mise');
   });
 

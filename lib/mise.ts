@@ -149,7 +149,9 @@ export async function installMise(): Promise<void> {
     core.debug(`mise cache restored but tool cache lookup for ${version} remained empty`);
   }
 
+  await materializeMiseBinary(toolPath, platform);
   core.addPath(toolPath);
+  core.addPath(path.dirname(getMiseBinPath()));
   core.addPath(getMiseShimsDir());
   core.info(`mise ${version} ready`);
 }
@@ -305,6 +307,18 @@ async function downloadAndInstallMise(version: string, platform: MisePlatformInf
   }
 
   return tc.cacheDir(installDir, MISE_TOOL_NAME, version.replace(/^v/, ''));
+}
+
+async function materializeMiseBinary(toolPath: string, platform: MisePlatformInfo): Promise<void> {
+  const sourceBinary = path.join(toolPath, platform.binaryName);
+  const targetBinary = getMiseBinPath();
+
+  await fs.promises.mkdir(path.dirname(targetBinary), { recursive: true });
+  await fs.promises.copyFile(sourceBinary, targetBinary);
+
+  if (!platform.isWindows) {
+    await fs.promises.chmod(targetBinary, 0o755);
+  }
 }
 
 async function findMiseBinary(extractedPath: string, binaryName: string): Promise<string> {
