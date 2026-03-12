@@ -1,10 +1,16 @@
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
+import * as cache from '@actions/cache';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as tc from '@actions/tool-cache';
 
 const isWindows = process.platform === 'win32';
+const MISE_TOOL_NAME = 'mise';
+const MISE_RELEASES_BASE = 'https://github.com/jdx/mise/releases/download';
+const DEFAULT_MISE_VERSION = 'v2026.3.8';
 
 export interface MiseToolOptions {
   env?: Record<string, string>;
@@ -15,6 +21,14 @@ export interface MiseToolOptions {
 export interface MiseToolVersion {
   name: string;
   version: string;
+}
+
+interface MisePlatformInfo {
+  os: string;
+  arch: string;
+  assetName: string;
+  binaryName: string;
+  isWindows: boolean;
 }
 
 export function getMiseBinPath(): string {
@@ -40,37 +54,222 @@ export function getMiseShimsDir(): string {
 }
 
 export async function installMise(): Promise<void> {
-  core.info('Installing mise...');
-  if (isWindows) {
-    await installMiseWindows();
-  } else {
-    await exec.exec('sh', ['-c', 'curl https://mise.run | sh']);
+  const version = getMiseVersion();
+  const normalizedVersion = version.replace(/^v/, '');
+  const platform = getMisePlatformInfo();
+  const cacheInfo = getMiseToolCacheInfo(version, platform);
+  const toolCacheRoot = process.env.RUNNER_TOOL_CACHE || '/opt/hostedtoolcache';
+  const cachePaths = [`${toolCacheRoot}/${MISE_TOOL_NAME}`];
+
+  let restoredFromCache = false;
+  try {
+    const cacheKey = await cache.restoreCache(cachePaths, cacheInfo.cacheKey);
+    if (cacheKey) {
+      core.info(`Restored mise from cache (key: ${cacheKey})`);
+      restoredFromCache = true;
+    }
+  } catch (error) {
+    core.debug(`mise cache restore failed: ${error instanceof Error ? error.message : error}`);
   }
 
-  core.addPath(path.dirname(getMiseBinPath()));
+  let toolPath = tc.find(MISE_TOOL_NAME, normalizedVersion);
+  if (toolPath) {
+    core.info(`Using cached mise ${version}`);
+  } else {
+    core.info(`Installing mise ${version}...`);
+    toolPath = await downloadAndInstallMise(version, platform);
+
+    try {
+      await cache.saveCache(cachePaths, cacheInfo.cacheKey);
+      core.info(`Saved mise to cache (key: ${cacheInfo.cacheKey})`);
+    } catch (error) {
+      core.debug(`mise cache save failed: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
+  if (!toolPath) {
+    throw new Error(`Failed to install mise ${version}`);
+  }
+
+  if (restoredFromCache && !tc.find(MISE_TOOL_NAME, normalizedVersion)) {
+    core.debug(`mise cache restored but tool cache lookup for ${version} remained empty`);
+  }
+
+  core.addPath(toolPath);
   core.addPath(getMiseShimsDir());
+  core.info(`mise ${version} ready`);
 }
 
-async function installMiseWindows(): Promise<void> {
-  const arch = os.arch() === 'arm64' ? 'arm64' : 'x64';
-  const miseVersion = process.env.MISE_VERSION || 'v2026.2.8';
-  const url = `https://github.com/jdx/mise/releases/download/${miseVersion}/mise-${miseVersion}-windows-${arch}.zip`;
+function getMiseVersion(): string {
+  const value = process.env.MISE_VERSION || DEFAULT_MISE_VERSION;
+  return value.startsWith('v') ? value : `v${value}`;
+}
 
-  const binDir = path.dirname(getMiseBinPath());
-  await fs.promises.mkdir(binDir, { recursive: true });
+function getMisePlatformInfo(): MisePlatformInfo {
+  const runnerOS = process.env.RUNNER_OS || os.platform();
+  const runnerArch = process.env.RUNNER_ARCH || os.arch();
 
-  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'mise-'));
-  try {
-    const zipPath = path.join(tempDir, 'mise.zip');
-    await exec.exec('curl', ['-fsSL', '-o', zipPath, url]);
-    await exec.exec('tar', ['-xf', zipPath, '-C', tempDir]);
-    await fs.promises.copyFile(
-      path.join(tempDir, 'mise', 'bin', 'mise.exe'),
-      getMiseBinPath(),
-    );
-  } finally {
-    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  const osName = normalizeRunnerOs(runnerOS);
+  const arch = normalizeRunnerArch(runnerArch);
+  const version = getMiseVersion();
+
+  if (osName === 'windows') {
+    return {
+      os: osName,
+      arch,
+      assetName: `mise-${version}-windows-${arch}.zip`,
+      binaryName: 'mise.exe',
+      isWindows: true,
+    };
   }
+
+  return {
+    os: osName,
+    arch,
+    assetName: `mise-${version}-${osName}-${arch}`,
+    binaryName: 'mise',
+    isWindows: false,
+  };
+}
+
+function normalizeRunnerOs(value: string): string {
+  const normalized = value.toLowerCase();
+  if (normalized === 'darwin' || normalized === 'macos') {
+    return 'macos';
+  }
+  if (normalized === 'win32' || normalized === 'windows') {
+    return 'windows';
+  }
+  if (normalized === 'linux') {
+    return 'linux';
+  }
+  throw new Error(`Unsupported platform for mise: OS=${value}`);
+}
+
+function normalizeRunnerArch(value: string): string {
+  const normalized = value.toLowerCase();
+  if (normalized === 'x64' || normalized === 'amd64') {
+    return 'x64';
+  }
+  if (normalized === 'arm64' || normalized === 'aarch64') {
+    return 'arm64';
+  }
+  throw new Error(`Unsupported architecture for mise: ARCH=${value}`);
+}
+
+function getMiseToolCacheInfo(version: string, platform: MisePlatformInfo): {
+  cacheKey: string;
+  cachePattern: string;
+} {
+  const normalizedVersion = version.replace(/^v/, '');
+  const toolCacheRoot = process.env.RUNNER_TOOL_CACHE || '/opt/hostedtoolcache';
+
+  return {
+    cacheKey: `${MISE_TOOL_NAME}-${normalizedVersion}-${platform.os}-${platform.arch}`,
+    cachePattern: `${toolCacheRoot}/${MISE_TOOL_NAME}/${normalizedVersion}*`,
+  };
+}
+
+function getMiseDownloadUrl(version: string, assetName: string): string {
+  return `${MISE_RELEASES_BASE}/${version}/${assetName}`;
+}
+
+function getMiseChecksumsUrl(version: string): string {
+  return `${MISE_RELEASES_BASE}/${version}/SHASUMS256.txt`;
+}
+
+async function computeFileHash(filePath: string): Promise<string> {
+  const fileBuffer = await fs.promises.readFile(filePath);
+  const hashSum = crypto.createHash('sha256');
+  hashSum.update(fileBuffer);
+  return hashSum.digest('hex');
+}
+
+function parseChecksums(content: string, assetName: string): string | null {
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    const match = trimmed.match(/^([a-f0-9]{64})\s+(.+)$/i);
+    if (!match) {
+      continue;
+    }
+
+    const [, hash, filename] = match;
+    if (filename === assetName || filename.endsWith(`/${assetName}`)) {
+      return hash.toLowerCase();
+    }
+  }
+
+  return null;
+}
+
+async function getExpectedChecksum(version: string, assetName: string): Promise<string> {
+  const checksumsPath = await tc.downloadTool(getMiseChecksumsUrl(version));
+  const content = await fs.promises.readFile(checksumsPath, 'utf-8');
+  const checksum = parseChecksums(content, assetName);
+
+  if (!checksum) {
+    throw new Error(`Checksum not found for mise asset: ${assetName}`);
+  }
+
+  return checksum;
+}
+
+async function verifyChecksum(filePath: string, expectedChecksum: string, assetName: string): Promise<void> {
+  const actualChecksum = await computeFileHash(filePath);
+  if (actualChecksum !== expectedChecksum) {
+    throw new Error(
+      `Checksum verification failed for ${assetName}:\n` +
+      `  Expected: ${expectedChecksum}\n` +
+      `  Actual:   ${actualChecksum}`,
+    );
+  }
+}
+
+async function downloadAndInstallMise(version: string, platform: MisePlatformInfo): Promise<string> {
+  const downloadUrl = getMiseDownloadUrl(version, platform.assetName);
+  core.info(`Downloading mise from: ${downloadUrl}`);
+
+  const downloadedPath = await tc.downloadTool(downloadUrl);
+  const expectedChecksum = await getExpectedChecksum(version, platform.assetName);
+  await verifyChecksum(downloadedPath, expectedChecksum, platform.assetName);
+
+  const installDir = path.join(os.tmpdir(), 'mise-install', version.replace(/^v/, ''));
+  await fs.promises.mkdir(installDir, { recursive: true });
+
+  const binaryPath = path.join(installDir, platform.binaryName);
+  if (platform.isWindows) {
+    const extractedPath = await tc.extractZip(downloadedPath);
+    const extractedBinary = await findMiseBinary(extractedPath, platform.binaryName);
+    await fs.promises.copyFile(extractedBinary, binaryPath);
+  } else {
+    await fs.promises.copyFile(downloadedPath, binaryPath);
+    await fs.promises.chmod(binaryPath, 0o755);
+  }
+
+  return tc.cacheDir(installDir, MISE_TOOL_NAME, version.replace(/^v/, ''));
+}
+
+async function findMiseBinary(extractedPath: string, binaryName: string): Promise<string> {
+  const candidates = [
+    path.join(extractedPath, 'mise', 'bin', binaryName),
+    path.join(extractedPath, 'bin', binaryName),
+    path.join(extractedPath, binaryName),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      await fs.promises.access(candidate);
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error(`Unable to locate ${binaryName} in extracted mise archive`);
 }
 
 export async function installMiseTool(

@@ -1,8 +1,11 @@
+import * as crypto from 'crypto';
 import * as os from 'os';
 import * as path from 'path';
 
 jest.mock('@actions/core');
 jest.mock('@actions/exec');
+jest.mock('@actions/tool-cache');
+jest.mock('@actions/cache');
 jest.mock('fs', () => ({
   ...jest.requireActual('fs'),
   promises: {
@@ -11,13 +14,16 @@ jest.mock('fs', () => ({
     mkdir: jest.fn().mockResolvedValue(undefined),
     mkdtemp: jest.fn().mockResolvedValue('/tmp/mise-123'),
     copyFile: jest.fn().mockResolvedValue(undefined),
+    chmod: jest.fn().mockResolvedValue(undefined),
     rm: jest.fn().mockResolvedValue(undefined),
   },
 }));
 
+import * as cache from '@actions/cache';
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import * as fs from 'fs';
+import * as tc from '@actions/tool-cache';
 import {
   activateMiseTool,
   getMiseBinPath,
@@ -34,13 +40,52 @@ import {
   reshimMise,
 } from '../lib/mise';
 
+const MOCK_BINARY_CONTENT = Buffer.from('mock-mise-binary');
+const MOCK_BINARY_HASH = crypto.createHash('sha256').update(MOCK_BINARY_CONTENT).digest('hex');
+const SAMPLE_SHASUMS256 = `${MOCK_BINARY_HASH}  mise-v2026.3.8-linux-x64
+${MOCK_BINARY_HASH}  mise-v2026.3.8-linux-arm64
+${MOCK_BINARY_HASH}  mise-v2026.3.8-macos-arm64
+${MOCK_BINARY_HASH}  mise-v2026.3.8-macos-x64
+${MOCK_BINARY_HASH}  mise-v2026.3.8-windows-x64.zip
+`;
+
+const originalEnv = process.env;
 const mockedCore = jest.mocked(core);
 const mockedExec = jest.mocked(exec);
+const mockedCache = jest.mocked(cache);
 const mockedFs = jest.mocked(fs);
+const mockedTc = jest.mocked(tc);
 
 describe('mise helpers', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    process.env = { ...originalEnv };
+    delete process.env.MISE_VERSION;
+    delete process.env.RUNNER_OS;
+    delete process.env.RUNNER_ARCH;
+    delete process.env.RUNNER_TOOL_CACHE;
+
+    mockedCache.restoreCache.mockResolvedValue(undefined);
+    mockedCache.saveCache.mockResolvedValue(1);
+    mockedTc.find.mockReturnValue('');
+    mockedTc.cacheDir.mockResolvedValue('/tmp/mise-tool-cache');
+    mockedTc.extractZip.mockResolvedValue('/tmp/mise-extracted');
+    mockedTc.downloadTool.mockImplementation(async (url: string) => {
+      if (url.endsWith('SHASUMS256.txt')) {
+        return '/tmp/SHASUMS256.txt';
+      }
+      return '/tmp/mise-download';
+    });
+    mockedFs.promises.readFile.mockImplementation((filePath: fs.PathLike | unknown, options?: unknown) => {
+      if (options === 'utf-8' || String(filePath).includes('SHASUMS256')) {
+        return Promise.resolve(SAMPLE_SHASUMS256);
+      }
+      return Promise.resolve(MOCK_BINARY_CONTENT);
+    });
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
   });
 
   it('returns the platform-specific mise binary path', () => {
@@ -67,19 +112,64 @@ describe('mise helpers', () => {
   });
 
   it('installs mise and adds the bin and shims directories to PATH', async () => {
+    process.env.RUNNER_OS = 'Linux';
+    process.env.RUNNER_ARCH = 'X64';
+
     await installMise();
 
-    if (process.platform === 'win32') {
-      expect(mockedExec.exec).toHaveBeenCalledWith(
-        'curl',
-        expect.arrayContaining(['-fsSL']),
-      );
-    } else {
-      expect(mockedExec.exec).toHaveBeenCalledWith('sh', ['-c', 'curl https://mise.run | sh']);
-    }
-
-    expect(mockedCore.addPath).toHaveBeenCalledWith(path.dirname(getMiseBinPath()));
+    expect(mockedTc.downloadTool).toHaveBeenNthCalledWith(
+      1,
+      'https://github.com/jdx/mise/releases/download/v2026.3.8/mise-v2026.3.8-linux-x64',
+    );
+    expect(mockedTc.downloadTool).toHaveBeenNthCalledWith(
+      2,
+      'https://github.com/jdx/mise/releases/download/v2026.3.8/SHASUMS256.txt',
+    );
+    expect(mockedCache.restoreCache).toHaveBeenCalledWith(
+      [expect.stringContaining('/mise')],
+      'mise-2026.3.8-linux-x64',
+    );
+    expect(mockedCache.saveCache).toHaveBeenCalledWith(
+      [expect.stringContaining('/mise')],
+      'mise-2026.3.8-linux-x64',
+    );
+    expect(mockedTc.cacheDir).toHaveBeenCalled();
+    expect(mockedCore.addPath).toHaveBeenCalledWith('/tmp/mise-tool-cache');
     expect(mockedCore.addPath).toHaveBeenCalledWith(getMiseShimsDir());
+  });
+
+  it('uses cached mise when restoreCache repopulates the runner tool cache', async () => {
+    process.env.RUNNER_OS = 'Linux';
+    process.env.RUNNER_ARCH = 'X64';
+
+    mockedCache.restoreCache.mockResolvedValue('mise-2026.3.8-linux-x64');
+    mockedTc.find.mockReturnValue('/tmp/cached-mise');
+
+    await installMise();
+
+    expect(mockedTc.downloadTool).not.toHaveBeenCalled();
+    expect(mockedCache.saveCache).not.toHaveBeenCalled();
+    expect(mockedCore.addPath).toHaveBeenCalledWith('/tmp/cached-mise');
+  });
+
+  it('honors MISE_VERSION overrides with a pinned release asset', async () => {
+    process.env.RUNNER_OS = 'Linux';
+    process.env.RUNNER_ARCH = 'X64';
+    process.env.MISE_VERSION = '2026.4.1';
+
+    mockedFs.promises.readFile.mockImplementation((filePath: fs.PathLike | unknown, options?: unknown) => {
+      if (options === 'utf-8' || String(filePath).includes('SHASUMS256')) {
+        return Promise.resolve(`${MOCK_BINARY_HASH}  mise-v2026.4.1-linux-x64\n`);
+      }
+      return Promise.resolve(MOCK_BINARY_CONTENT);
+    });
+
+    await installMise();
+
+    expect(mockedTc.downloadTool).toHaveBeenNthCalledWith(
+      1,
+      'https://github.com/jdx/mise/releases/download/v2026.4.1/mise-v2026.4.1-linux-x64',
+    );
   });
 
   it('installs and activates a mise-managed tool', async () => {
