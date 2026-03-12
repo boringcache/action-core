@@ -12,6 +12,11 @@ export interface MiseToolOptions {
   label?: string;
 }
 
+export interface MiseToolVersion {
+  name: string;
+  version: string;
+}
+
 export function getMiseBinPath(): string {
   const homedir = os.homedir();
   return isWindows
@@ -26,6 +31,14 @@ export function getMiseDataDir(): string {
   return path.join(os.homedir(), '.local', 'share', 'mise');
 }
 
+export function getMiseInstallsDir(): string {
+  return process.env.MISE_INSTALLS_DIR || path.join(getMiseDataDir(), 'installs');
+}
+
+export function getMiseShimsDir(): string {
+  return path.join(getMiseDataDir(), 'shims');
+}
+
 export async function installMise(): Promise<void> {
   core.info('Installing mise...');
   if (isWindows) {
@@ -35,7 +48,7 @@ export async function installMise(): Promise<void> {
   }
 
   core.addPath(path.dirname(getMiseBinPath()));
-  core.addPath(path.join(getMiseDataDir(), 'shims'));
+  core.addPath(getMiseShimsDir());
 }
 
 async function installMiseWindows(): Promise<void> {
@@ -87,42 +100,246 @@ export async function activateMiseTool(
   await exec.exec(getMiseBinPath(), buildUseArgs(spec, global), { env: options.env });
 }
 
+export async function reshimMise(force = true): Promise<void> {
+  const args = force ? ['reshim', '-f'] : ['reshim'];
+  core.info('Refreshing mise shims...');
+  await exec.exec(getMiseBinPath(), args);
+}
+
 function buildUseArgs(spec: string, global: boolean): string[] {
   return global ? ['use', '-g', spec] : ['use', spec];
 }
 
-export async function readMiseTomlVersion(workingDir: string, toolName: string): Promise<string | null> {
-  const miseToml = path.join(workingDir, 'mise.toml');
+export async function readToolVersions(workingDir: string): Promise<MiseToolVersion[]> {
+  const toolVersionsPath = path.join(workingDir, '.tool-versions');
+
   try {
-    const content = await fs.promises.readFile(miseToml, 'utf-8');
-    const toolsMatch = content.match(/\[tools\]([\s\S]*?)(?:\n\[|$)/);
-    if (!toolsMatch) {
-      return null;
+    const content = await fs.promises.readFile(toolVersionsPath, 'utf-8');
+    const tools = new Map<string, string>();
+
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = stripTomlComment(rawLine).trim();
+      if (!line) {
+        continue;
+      }
+
+      const [toolName, version] = line.split(/\s+/, 3);
+      if (!toolName || !version) {
+        continue;
+      }
+
+      tools.set(normalizeToolName(toolName), version.trim());
     }
 
-    const toolsBlock = toolsMatch[1];
-    const escapedToolName = escapeRegExp(toolName);
-    const stringVersionMatch = toolsBlock.match(
-      new RegExp(`^\\s*${escapedToolName}\\s*=\\s*["']([^"']+)["']`, 'm')
-    );
-    if (stringVersionMatch) {
-      return stringVersionMatch[1];
-    }
-
-    const tableVersionMatch = toolsBlock.match(
-      new RegExp(
-        `^\\s*${escapedToolName}\\s*=\\s*\\{[^\\n}]*\\bversion\\s*=\\s*["']([^"']+)["'][^\\n}]*\\}`,
-        'm',
-      ),
-    );
-    if (tableVersionMatch) {
-      return tableVersionMatch[1];
-    }
-  } catch {}
-
-  return null;
+    return Array.from(tools, ([name, version]) => ({ name, version }));
+  } catch {
+    return [];
+  }
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export async function readToolVersionsValue(workingDir: string, toolName: string): Promise<string | null> {
+  const normalizedToolName = normalizeToolName(toolName);
+  const tools = await readToolVersions(workingDir);
+  return tools.find((tool) => tool.name === normalizedToolName)?.version || null;
+}
+
+export async function readMiseTomlTools(workingDir: string): Promise<MiseToolVersion[]> {
+  const miseToml = path.join(workingDir, 'mise.toml');
+
+  try {
+    const content = await fs.promises.readFile(miseToml, 'utf-8');
+    const toolsBlock = extractToolsBlock(content);
+    if (!toolsBlock) {
+      return [];
+    }
+
+    const tools = new Map<string, string>();
+    const lines = toolsBlock.split(/\r?\n/);
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const parsedLine = stripTomlComment(lines[index]).trim();
+      if (!parsedLine) {
+        continue;
+      }
+
+      const assignmentMatch = parsedLine.match(/^([A-Za-z0-9._-]+)\s*=\s*(.+)$/);
+      if (!assignmentMatch) {
+        continue;
+      }
+
+      const [, rawToolName, rawValue] = assignmentMatch;
+      const toolName = normalizeToolName(rawToolName);
+      const value = rawValue.trim();
+
+      const stringVersion = value.match(/^["']([^"']+)["']$/);
+      if (stringVersion?.[1]) {
+        tools.set(toolName, stringVersion[1]);
+        continue;
+      }
+
+      const inlineVersion = extractInlineTableVersion(value);
+      if (inlineVersion) {
+        tools.set(toolName, inlineVersion);
+        continue;
+      }
+
+      if (value.startsWith('{')) {
+        let blockValue = value;
+        let braceDepth = countBraceDelta(value);
+
+        while (braceDepth > 0 && index + 1 < lines.length) {
+          index += 1;
+          const nextLine = stripTomlComment(lines[index]).trim();
+          blockValue = `${blockValue}\n${nextLine}`;
+          braceDepth += countBraceDelta(nextLine);
+        }
+
+        const blockVersion = extractInlineTableVersion(blockValue);
+        if (blockVersion) {
+          tools.set(toolName, blockVersion);
+        }
+      }
+    }
+
+    return Array.from(tools, ([name, version]) => ({ name, version }));
+  } catch {
+    return [];
+  }
+}
+
+export async function readMiseTomlVersion(workingDir: string, toolName: string): Promise<string | null> {
+  const normalizedToolName = normalizeToolName(toolName);
+  const tools = await readMiseTomlTools(workingDir);
+  return tools.find((tool) => tool.name === normalizedToolName)?.version || null;
+}
+
+export async function readProjectMiseTools(workingDir: string): Promise<MiseToolVersion[]> {
+  const toolVersions = await readToolVersions(workingDir);
+  const miseTomlTools = await readMiseTomlTools(workingDir);
+  const merged = new Map<string, string>();
+
+  for (const tool of toolVersions) {
+    merged.set(tool.name, tool.version);
+  }
+
+  for (const tool of miseTomlTools) {
+    merged.set(tool.name, tool.version);
+  }
+
+  return Array.from(merged, ([name, version]) => ({ name, version }));
+}
+
+function extractToolsBlock(content: string): string | null {
+  const lines = content.split(/\r?\n/);
+  const block: string[] = [];
+  let inToolsBlock = false;
+
+  for (const rawLine of lines) {
+    const line = stripTomlComment(rawLine).trim();
+    if (!inToolsBlock) {
+      if (line === '[tools]') {
+        inToolsBlock = true;
+      }
+      continue;
+    }
+
+    if (line.startsWith('[') && line.endsWith(']')) {
+      break;
+    }
+
+    block.push(rawLine);
+  }
+
+  return inToolsBlock ? block.join('\n') : null;
+}
+
+function extractInlineTableVersion(value: string): string | null {
+  const versionMatch = value.match(/\bversion\s*=\s*["']([^"']+)["']/);
+  return versionMatch?.[1] || null;
+}
+
+function countBraceDelta(value: string): number {
+  let delta = 0;
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let isEscaped = false;
+
+  for (const character of value) {
+    if (isEscaped) {
+      isEscaped = false;
+      continue;
+    }
+
+    if (character === '\\' && inDoubleQuote) {
+      isEscaped = true;
+      continue;
+    }
+
+    if (!inDoubleQuote && character === '\'') {
+      inSingleQuote = !inSingleQuote;
+      continue;
+    }
+
+    if (!inSingleQuote && character === '"') {
+      inDoubleQuote = !inDoubleQuote;
+      continue;
+    }
+
+    if (inSingleQuote || inDoubleQuote) {
+      continue;
+    }
+
+    if (character === '{') {
+      delta += 1;
+    } else if (character === '}') {
+      delta -= 1;
+    }
+  }
+
+  return delta;
+}
+
+function stripTomlComment(value: string): string {
+  let result = '';
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let isEscaped = false;
+
+  for (const character of value) {
+    if (isEscaped) {
+      result += character;
+      isEscaped = false;
+      continue;
+    }
+
+    if (character === '\\' && inDoubleQuote) {
+      result += character;
+      isEscaped = true;
+      continue;
+    }
+
+    if (!inDoubleQuote && character === '\'') {
+      inSingleQuote = !inSingleQuote;
+      result += character;
+      continue;
+    }
+
+    if (!inSingleQuote && character === '"') {
+      inDoubleQuote = !inDoubleQuote;
+      result += character;
+      continue;
+    }
+
+    if (!inSingleQuote && !inDoubleQuote && character === '#') {
+      break;
+    }
+
+    result += character;
+  }
+
+  return result;
+}
+
+function normalizeToolName(value: string): string {
+  return value.trim().toLowerCase();
 }

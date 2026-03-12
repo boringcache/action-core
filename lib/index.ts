@@ -49,9 +49,17 @@ export {
 export {
   getMiseBinPath,
   getMiseDataDir,
+  getMiseInstallsDir,
+  getMiseShimsDir,
   installMise,
   installMiseTool,
   activateMiseTool,
+  reshimMise,
+  readToolVersions,
+  readToolVersionsValue,
+  readMiseTomlTools,
   readMiseTomlVersion,
+  readProjectMiseTools,
   MiseToolOptions,
+  MiseToolVersion,
 } from './mise';
