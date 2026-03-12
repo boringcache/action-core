@@ -51,6 +51,10 @@ export {
   getMiseDataDir,
   getMiseInstallsDir,
   getMiseShimsDir,
+  slugMiseTagPart,
+  scopeMiseToolVersion,
+  buildMiseToolTag,
+  buildMiseRuntimeTag,
   installMise,
   installMiseTool,
   activateMiseTool,
@@ -61,5 +65,6 @@ export {
   readMiseTomlVersion,
   readProjectMiseTools,
   MiseToolOptions,
+  MiseVersionScope,
   MiseToolVersion,
 } from './mise';

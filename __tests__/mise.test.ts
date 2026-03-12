@@ -26,6 +26,8 @@ import * as fs from 'fs';
 import * as tc from '@actions/tool-cache';
 import {
   activateMiseTool,
+  buildMiseRuntimeTag,
+  buildMiseToolTag,
   getMiseBinPath,
   getMiseDataDir,
   getMiseInstallsDir,
@@ -38,6 +40,8 @@ import {
   readToolVersions,
   readToolVersionsValue,
   reshimMise,
+  scopeMiseToolVersion,
+  slugMiseTagPart,
 } from '../lib/mise';
 
 const MOCK_BINARY_CONTENT = Buffer.from('mock-mise-binary');
@@ -109,6 +113,26 @@ describe('mise helpers', () => {
   it('returns the installs and shims directories derived from the mise data directory', () => {
     expect(getMiseInstallsDir()).toBe(path.join(getMiseDataDir(), 'installs'));
     expect(getMiseShimsDir()).toBe(path.join(getMiseDataDir(), 'shims'));
+  });
+
+  it('builds readable mise runtime tags', () => {
+    expect(buildMiseRuntimeTag('web', [
+      { name: 'ruby', version: '4.0.1' },
+      { name: 'pnpm', version: '9.15.1' },
+    ])).toBe('web-mise-pnpm-9.15.1-ruby-4.0.1');
+  });
+
+  it('supports scoped version tags for deterministic reuse', () => {
+    expect(buildMiseToolTag([
+      { name: 'ruby', version: '4.0.1' },
+      { name: 'node', version: '22.4.1' },
+    ], 'minor')).toBe('node-22.4-ruby-4.0');
+    expect(scopeMiseToolVersion('4.0.1', 'major')).toBe('4');
+  });
+
+  it('slugifies non-semver mise versions safely', () => {
+    expect(scopeMiseToolVersion('nightly-2026-03-12', 'patch')).toBe('nightly-2026-03-12');
+    expect(slugMiseTagPart(' Ruby 4.0.1 ')).toBe('ruby-4.0.1');
   });
 
   it('installs mise and adds the bin and shims directories to PATH', async () => {
