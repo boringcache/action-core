@@ -45,3 +45,13 @@ export {
   ProxyOptions,
   ProxyHandle,
 } from './proxy';
+
+export {
+  getMiseBinPath,
+  getMiseDataDir,
+  installMise,
+  installMiseTool,
+  activateMiseTool,
+  readMiseTomlVersion,
+  MiseToolOptions,
+} from './mise';
