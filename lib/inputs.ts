@@ -162,6 +162,11 @@ export function getInputsWorkspace(inputs: Record<string, unknown>): string {
     return inputs.workspace;
   }
 
+  const defaultWorkspace = process.env.BORINGCACHE_DEFAULT_WORKSPACE;
+  if (defaultWorkspace) {
+    return defaultWorkspace.includes('/') ? defaultWorkspace : `default/${defaultWorkspace}`;
+  }
+
   const repo = process.env.GITHUB_REPOSITORY;
   if (repo) {
     const parts = repo.split('/');
