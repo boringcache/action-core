@@ -317,6 +317,19 @@ describe('action-core', () => {
       );
     });
 
+    it('throws actionable error when CLI release asset is missing', async () => {
+      mockedExec.exec.mockRejectedValueOnce(new Error('Command not found'));
+      mockedTc.find.mockReturnValue('');
+      mockedTc.downloadTool.mockRejectedValueOnce(new Error('Unexpected HTTP response: 404'));
+
+      process.env.RUNNER_OS = 'Linux';
+      process.env.RUNNER_ARCH = 'X64';
+
+      await expect(ensureBoringCache({ version: 'v1.12.6' })).rejects.toThrow(
+        'release asset not found. The requested cli-version may not be published yet.'
+      );
+    });
+
     it('parses SHA256SUMS with single space separator', async () => {
       mockedFs.promises.readFile.mockImplementation((path: any, encoding?: any) => {
         if (encoding === 'utf-8') {
@@ -349,6 +362,10 @@ describe('action-core', () => {
   });
 
   describe('execBoringCache', () => {
+    beforeEach(() => {
+      mockedExec.exec.mockReset();
+    });
+
     it('executes boringcache command', async () => {
       mockedExec.exec.mockResolvedValue(0);
 

@@ -217,7 +217,21 @@ async function downloadAndInstall(
   const downloadUrl = getDownloadUrl(version, platform.assetName);
   core.info(`Downloading BoringCache CLI from: ${downloadUrl}`);
 
-  const downloadedPath = await tc.downloadTool(downloadUrl);
+  let downloadedPath: string;
+  try {
+    downloadedPath = await tc.downloadTool(downloadUrl);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes('404')) {
+      throw new Error(
+        `Failed to download BoringCache CLI ${version} (${platform.assetName}) from ${downloadUrl}: ` +
+        'release asset not found. The requested cli-version may not be published yet.'
+      );
+    }
+    throw new Error(
+      `Failed to download BoringCache CLI ${version} (${platform.assetName}) from ${downloadUrl}: ${msg}`
+    );
+  }
 
   // Verify checksum if enabled
   if (verify) {
