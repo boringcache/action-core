@@ -552,6 +552,10 @@ function getToolVersionProbes(toolName: string): ToolVersionProbe[] {
       return [{ command: 'npm', args: ['--version'] }];
     case 'pnpm':
       return [{ command: 'pnpm', args: ['--version'] }];
+    case 'composer':
+      return [{ command: 'composer', args: ['--version'], versionPattern: /Composer version\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' }];
+    case 'php':
+      return [{ command: 'php', args: ['--version'], versionPattern: /PHP\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' }];
     case 'python':
       return [
         { command: 'python3', args: ['--version'], versionPattern: /Python\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' },
@@ -565,6 +569,8 @@ function getToolVersionProbes(toolName: string): ToolVersionProbe[] {
       return [{ command: 'sccache', args: ['--version'], versionPattern: /sccache\s+([0-9A-Za-z.+-]+)/i }];
     case 'turbo':
       return [{ command: 'turbo', args: ['--version'] }];
+    case 'uv':
+      return [{ command: 'uv', args: ['--version'] }];
     case 'yarn':
       return [{ command: 'yarn', args: ['--version'] }];
     default:

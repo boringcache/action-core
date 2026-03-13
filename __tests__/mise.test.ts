@@ -297,6 +297,33 @@ describe('mise helpers', () => {
     await expect(hasToolVersionOnPath('sccache', '0.13.0')).resolves.toBe(true);
   });
 
+  it('detects uv versions from PATH', async () => {
+    mockedExec.exec.mockImplementationOnce(async (_command, _args, options) => {
+      options?.listeners?.stdout?.(Buffer.from('uv 0.9.21\n'));
+      return 0;
+    });
+
+    await expect(hasToolVersionOnPath('uv', '0.9.21')).resolves.toBe(true);
+  });
+
+  it('detects php versions from PATH', async () => {
+    mockedExec.exec.mockImplementationOnce(async (_command, _args, options) => {
+      options?.listeners?.stdout?.(Buffer.from('PHP 8.4.4 (cli) (built: Jan  1 2026 00:00:00) (NTS)\n'));
+      return 0;
+    });
+
+    await expect(hasToolVersionOnPath('php', '8.4')).resolves.toBe(true);
+  });
+
+  it('detects composer versions from PATH', async () => {
+    mockedExec.exec.mockImplementationOnce(async (_command, _args, options) => {
+      options?.listeners?.stdout?.(Buffer.from('Composer version 2.9.5 2026-02-14 10:00:00\n'));
+      return 0;
+    });
+
+    await expect(hasToolVersionOnPath('composer', '2.9')).resolves.toBe(true);
+  });
+
   it('treats missing PATH tools as unavailable instead of throwing', async () => {
     mockedExec.exec.mockRejectedValueOnce(new Error('Unable to locate executable file: pnpm'));
 
