@@ -32,6 +32,8 @@ import {
   getMiseDataDir,
   getMiseInstallsDir,
   getMiseShimsDir,
+  hasMiseToolVersion,
+  hasToolVersionOnPath,
   installMise,
   installMiseTool,
   readMiseTomlTools,
@@ -232,6 +234,66 @@ describe('mise helpers', () => {
       ['use', '-g', 'node@22'],
       { env: undefined },
     );
+  });
+
+  it('detects matching installed mise tool versions from mise ls json', async () => {
+    mockedExec.exec.mockImplementationOnce(async (_command, _args, options) => {
+      options?.listeners?.stdout?.(Buffer.from(JSON.stringify([
+        { version: '4.0.1-boringcache', installed: true },
+        { version: '4.0.0', installed: true },
+      ])));
+      return 0;
+    });
+
+    await expect(hasMiseToolVersion('ruby', '4.0.1')).resolves.toBe(true);
+    expect(mockedExec.exec).toHaveBeenCalledWith(
+      getMiseBinPath(),
+      ['ls', 'ruby', '--installed', '--json'],
+      expect.objectContaining({ ignoreReturnCode: true, silent: true }),
+    );
+  });
+
+  it('ignores unavailable mise entries when checking installed versions', async () => {
+    mockedExec.exec.mockImplementationOnce(async (_command, _args, options) => {
+      options?.listeners?.stdout?.(Buffer.from(JSON.stringify([
+        { version: '22.4.1', installed: false },
+      ])));
+      return 0;
+    });
+
+    await expect(hasMiseToolVersion('node', '22.4.1')).resolves.toBe(false);
+  });
+
+  it('detects matching versions from tools already on PATH', async () => {
+    mockedExec.exec.mockImplementationOnce(async (_command, _args, options) => {
+      options?.listeners?.stdout?.(Buffer.from('v22.4.1\n'));
+      return 0;
+    });
+
+    await expect(hasToolVersionOnPath('node', '22.4.1')).resolves.toBe(true);
+    expect(mockedExec.exec).toHaveBeenCalledWith(
+      'node',
+      ['--version'],
+      expect.objectContaining({ ignoreReturnCode: true, silent: true }),
+    );
+  });
+
+  it('reads java versions from stderr when probing PATH tools', async () => {
+    mockedExec.exec.mockImplementationOnce(async (_command, _args, options) => {
+      options?.listeners?.stderr?.(Buffer.from('openjdk version "21.0.7" 2025-04-15\n'));
+      return 0;
+    });
+
+    await expect(hasToolVersionOnPath('java', '21')).resolves.toBe(true);
+  });
+
+  it('detects sccache versions from PATH', async () => {
+    mockedExec.exec.mockImplementationOnce(async (_command, _args, options) => {
+      options?.listeners?.stdout?.(Buffer.from('sccache 0.13.0\n'));
+      return 0;
+    });
+
+    await expect(hasToolVersionOnPath('sccache', '0.13.0')).resolves.toBe(true);
   });
 
   it('refreshes mise shims on demand', async () => {

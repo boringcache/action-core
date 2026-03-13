@@ -23,6 +23,18 @@ export interface MiseToolVersion {
   version: string;
 }
 
+interface MiseLsEntry {
+  version?: string;
+  installed?: boolean;
+}
+
+interface ToolVersionProbe {
+  command: string;
+  args: string[];
+  stream?: 'stdout' | 'stderr' | 'combined';
+  versionPattern?: RegExp;
+}
+
 export type MiseVersionScope = 'major' | 'minor' | 'patch';
 
 interface MisePlatformInfo {
@@ -105,6 +117,59 @@ export function buildMiseRuntimeTag(
     return slugMiseTagPart(prefix);
   }
   return `${slugMiseTagPart(prefix)}-mise-${toolTag}`;
+}
+
+export async function hasMiseToolVersion(toolName: string, version: string): Promise<boolean> {
+  const normalizedTool = normalizeToolName(toolName);
+  let output = '';
+
+  const exitCode = await exec.exec(
+    getMiseBinPath(),
+    ['ls', normalizedTool, '--installed', '--json'],
+    {
+      ignoreReturnCode: true,
+      silent: true,
+      listeners: {
+        stdout: (data: Buffer) => {
+          output += data.toString();
+        },
+      },
+    },
+  );
+
+  if (exitCode !== 0 || !output.trim()) {
+    return false;
+  }
+
+  let entries: MiseLsEntry[];
+  try {
+    const parsed = JSON.parse(output);
+    if (Array.isArray(parsed)) {
+      entries = parsed;
+    } else if (Array.isArray((parsed as { versions?: unknown[] })?.versions)) {
+      entries = (parsed as { versions: MiseLsEntry[] }).versions;
+    } else {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+
+  return entries.some((entry) => entry.installed !== false && isMatchingToolVersion(version, entry.version || ''));
+}
+
+export async function hasToolVersionOnPath(toolName: string, version: string): Promise<boolean> {
+  const normalizedTool = normalizeToolName(toolName);
+  const probes = getToolVersionProbes(normalizedTool);
+
+  for (const probe of probes) {
+    const detectedVersion = await detectToolVersion(probe);
+    if (detectedVersion && isMatchingToolVersion(version, detectedVersion)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export async function installMise(): Promise<void> {
@@ -352,6 +417,151 @@ export async function installMiseTool(
   core.info(`Installing ${label} ${version} via mise...`);
   await exec.exec(getMiseBinPath(), ['install', spec], { env: options.env });
   await exec.exec(getMiseBinPath(), buildUseArgs(spec, global), { env: options.env });
+}
+
+function normalizeToolVersion(value: string): string {
+  return value.trim().replace(/^v(?=\d)/, '');
+}
+
+function isMatchingToolVersion(requested: string, candidate: string): boolean {
+  const normalizedRequested = normalizeToolVersion(requested);
+  const normalizedCandidate = normalizeToolVersion(candidate);
+
+  if (!normalizedRequested || !normalizedCandidate) {
+    return false;
+  }
+
+  const requestedParts = extractNumericVersionParts(normalizedRequested);
+  const candidateParts = extractNumericVersionParts(normalizedCandidate);
+
+  if (requestedParts.length > 0 || candidateParts.length > 0) {
+    if (requestedParts.length === 0 || requestedParts.length > candidateParts.length) {
+      return false;
+    }
+
+    return requestedParts.every((part, index) => part === candidateParts[index]);
+  }
+
+  return slugMiseTagPart(normalizedRequested) === slugMiseTagPart(normalizedCandidate);
+}
+
+function extractNumericVersionParts(value: string): string[] {
+  const baseVersion = normalizeToolVersion(value).split('+')[0].trim();
+  const numericPrefix = baseVersion.match(/^\d+(?:\.\d+)*/)?.[0];
+
+  if (!numericPrefix) {
+    return [];
+  }
+
+  return numericPrefix
+    .split('.')
+    .map(normalizeVersionSegment)
+    .filter(Boolean);
+}
+
+function normalizeVersionSegment(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const numericMatch = trimmed.match(/^\d+/);
+  return numericMatch ? numericMatch[0] : trimmed;
+}
+
+async function detectToolVersion(probe: ToolVersionProbe): Promise<string | null> {
+  let stdout = '';
+  let stderr = '';
+
+  const exitCode = await exec.exec(
+    probe.command,
+    probe.args,
+    {
+      ignoreReturnCode: true,
+      silent: true,
+      listeners: {
+        stdout: (data: Buffer) => {
+          stdout += data.toString();
+        },
+        stderr: (data: Buffer) => {
+          stderr += data.toString();
+        },
+      },
+    },
+  );
+
+  if (exitCode !== 0) {
+    return null;
+  }
+
+  const output = probe.stream === 'stderr'
+    ? stderr
+    : probe.stream === 'combined'
+      ? `${stdout}\n${stderr}`
+      : stdout;
+
+  return extractVersionFromOutput(output, probe.versionPattern);
+}
+
+function extractVersionFromOutput(output: string, versionPattern?: RegExp): string | null {
+  const pattern = versionPattern || /\bv?(\d+(?:\.\d+)*(?:[-+][0-9A-Za-z.-]+)?)\b/;
+  const match = output.match(pattern);
+
+  if (!match) {
+    return null;
+  }
+
+  return match[1] || match[0] || null;
+}
+
+function getToolVersionProbes(toolName: string): ToolVersionProbe[] {
+  switch (toolName) {
+    case 'bazel':
+      return [
+        { command: 'bazel', args: ['--version'], versionPattern: /bazel\s+([0-9A-Za-z.+-]+)/i },
+        { command: 'bazelisk', args: ['version'], versionPattern: /Build label:\s*([0-9A-Za-z.+-]+)/i, stream: 'combined' },
+      ];
+    case 'bun':
+      return [{ command: 'bun', args: ['--version'] }];
+    case 'elixir':
+      return [{ command: 'elixir', args: ['--version'], versionPattern: /Elixir\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' }];
+    case 'erlang':
+      return [{
+        command: 'erl',
+        args: ['-noshell', '-eval', 'io:format("~s", [erlang:system_info(otp_release)]), halt().'],
+      }];
+    case 'go':
+      return [{ command: 'go', args: ['version'], versionPattern: /go version go([0-9A-Za-z.+-]+)/i }];
+    case 'gradle':
+      return [{ command: 'gradle', args: ['--version'], versionPattern: /Gradle\s+([0-9A-Za-z.+-]+)/i }];
+    case 'java':
+      return [{ command: 'java', args: ['-version'], versionPattern: /version\s+"([0-9A-Za-z.+-]+)"/i, stream: 'stderr' }];
+    case 'maven':
+      return [{ command: 'mvn', args: ['--version'], versionPattern: /Apache Maven\s+([0-9A-Za-z.+-]+)/i }];
+    case 'node':
+      return [{ command: 'node', args: ['--version'] }];
+    case 'npm':
+      return [{ command: 'npm', args: ['--version'] }];
+    case 'pnpm':
+      return [{ command: 'pnpm', args: ['--version'] }];
+    case 'python':
+      return [
+        { command: 'python3', args: ['--version'], versionPattern: /Python\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' },
+        { command: 'python', args: ['--version'], versionPattern: /Python\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' },
+      ];
+    case 'ruby':
+      return [{ command: 'ruby', args: ['--version'], versionPattern: /ruby\s+([0-9A-Za-z.+-]+)/i }];
+    case 'rust':
+      return [{ command: 'rustc', args: ['--version'], versionPattern: /rustc\s+([0-9A-Za-z.+-]+)/i }];
+    case 'sccache':
+      return [{ command: 'sccache', args: ['--version'], versionPattern: /sccache\s+([0-9A-Za-z.+-]+)/i }];
+    case 'turbo':
+      return [{ command: 'turbo', args: ['--version'] }];
+    case 'yarn':
+      return [{ command: 'yarn', args: ['--version'] }];
+    default:
+      return [];
+  }
 }
 
 export async function activateMiseTool(
@@ -608,5 +818,12 @@ function stripTomlComment(value: string): string {
 }
 
 function normalizeToolName(value: string): string {
-  return value.trim().toLowerCase();
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'nodejs') {
+    return 'node';
+  }
+  if (normalized === 'golang') {
+    return 'go';
+  }
+  return normalized;
 }

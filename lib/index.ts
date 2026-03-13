@@ -64,6 +64,8 @@ export {
   readMiseTomlTools,
   readMiseTomlVersion,
   readProjectMiseTools,
+  hasMiseToolVersion,
+  hasToolVersionOnPath,
   MiseToolOptions,
   MiseVersionScope,
   MiseToolVersion,
