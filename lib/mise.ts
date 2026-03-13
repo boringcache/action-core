@@ -472,23 +472,31 @@ function normalizeVersionSegment(value: string): string {
 async function detectToolVersion(probe: ToolVersionProbe): Promise<string | null> {
   let stdout = '';
   let stderr = '';
+  let exitCode: number;
 
-  const exitCode = await exec.exec(
-    probe.command,
-    probe.args,
-    {
-      ignoreReturnCode: true,
-      silent: true,
-      listeners: {
-        stdout: (data: Buffer) => {
-          stdout += data.toString();
-        },
-        stderr: (data: Buffer) => {
-          stderr += data.toString();
+  try {
+    exitCode = await exec.exec(
+      probe.command,
+      probe.args,
+      {
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: {
+          stdout: (data: Buffer) => {
+            stdout += data.toString();
+          },
+          stderr: (data: Buffer) => {
+            stderr += data.toString();
+          },
         },
       },
-    },
-  );
+    );
+  } catch (error) {
+    core.debug(
+      `Skipping PATH probe for ${probe.command}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  }
 
   if (exitCode !== 0) {
     return null;

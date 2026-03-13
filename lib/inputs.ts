@@ -16,6 +16,7 @@ export interface CacheEntry {
 
 interface ParseEntryOptions {
   resolvePaths?: boolean;
+  baseDir?: string;
 }
 
 export async function getCacheConfig(
@@ -74,7 +75,7 @@ export function validateInputs(inputs: Record<string, unknown>): void {
   }
 }
 
-export function resolvePath(pathInput: string): string {
+export function resolvePath(pathInput: string, baseDir?: string): string {
   const trimmedPath = pathInput.trim();
 
   if (path.isAbsolute(trimmedPath)) {
@@ -85,15 +86,15 @@ export function resolvePath(pathInput: string): string {
     return path.join(os.homedir(), trimmedPath.slice(2));
   }
 
-  return path.resolve(process.cwd(), trimmedPath);
+  return path.resolve(baseDir || process.cwd(), trimmedPath);
 }
 
-export function resolvePaths(pathInput: string): string {
+export function resolvePaths(pathInput: string, baseDir?: string): string {
   return pathInput
     .split('\n')
     .map(p => p.trim())
     .filter(p => p)
-    .map(p => resolvePath(p))
+    .map(p => resolvePath(p, baseDir))
     .join('\n');
 }
 
@@ -103,6 +104,7 @@ export function parseEntries(
   options: ParseEntryOptions = {}
 ): CacheEntry[] {
   const shouldResolve = options.resolvePaths ?? true;
+  const baseDir = options.baseDir;
 
   return entriesInput
     .split(/\r?\n|,/)
@@ -135,8 +137,8 @@ export function parseEntries(
         }
       }
 
-      const restorePath = shouldResolve ? resolvePath(restorePathInput) : restorePathInput;
-      const savePath = shouldResolve ? resolvePath(savePathInput) : savePathInput;
+      const restorePath = shouldResolve ? resolvePath(restorePathInput, baseDir) : restorePathInput;
+      const savePath = shouldResolve ? resolvePath(savePathInput, baseDir) : savePathInput;
 
       return { tag, restorePath, savePath };
     });
@@ -188,6 +190,8 @@ export function convertCacheFormatToEntries(
   const keyInput = inputs.key as string;
   const noPlatformInput = inputs.noPlatform as boolean | undefined;
   const enableCrossOsArchiveInput = inputs.enableCrossOsArchive as boolean | undefined;
+  const workingDirectoryInput = inputs.workingDirectory as string | undefined;
+  const baseDir = workingDirectoryInput?.trim() || undefined;
 
   const paths = pathInput
     .split('\n')
@@ -198,5 +202,5 @@ export function convertCacheFormatToEntries(
   const platformSuffix = getPlatformSuffix(shouldDisablePlatform, enableCrossOsArchiveInput || false);
   const fullKey = keyInput + platformSuffix;
 
-  return paths.map(p => `${fullKey}:${resolvePath(p)}`).join(',');
+  return paths.map(p => `${fullKey}:${resolvePath(p, baseDir)}`).join(',');
 }

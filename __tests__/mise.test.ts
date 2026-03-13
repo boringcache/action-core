@@ -297,6 +297,15 @@ describe('mise helpers', () => {
     await expect(hasToolVersionOnPath('sccache', '0.13.0')).resolves.toBe(true);
   });
 
+  it('treats missing PATH tools as unavailable instead of throwing', async () => {
+    mockedExec.exec.mockRejectedValueOnce(new Error('Unable to locate executable file: pnpm'));
+
+    await expect(hasToolVersionOnPath('pnpm', '10.12.1')).resolves.toBe(false);
+    expect(mockedCore.debug).toHaveBeenCalledWith(
+      expect.stringContaining('Skipping PATH probe for pnpm: Unable to locate executable file: pnpm'),
+    );
+  });
+
   it('refreshes mise shims on demand', async () => {
     await reshimMise();
 
