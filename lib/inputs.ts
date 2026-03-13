@@ -105,7 +105,7 @@ export function parseEntries(
   const shouldResolve = options.resolvePaths ?? true;
 
   return entriesInput
-    .split(',')
+    .split(/\r?\n|,/)
     .map(entry => entry.trim())
     .filter(entry => entry)
     .map(entry => {
