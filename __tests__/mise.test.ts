@@ -28,6 +28,7 @@ import {
   activateMiseTool,
   buildMiseRuntimeTag,
   buildMiseToolTag,
+  exportMiseEnv,
   getMiseBinPath,
   getMiseDataDir,
   getMiseInstallsDir,
@@ -304,6 +305,40 @@ describe('mise helpers', () => {
       getMiseBinPath(),
       ['reshim', '-f'],
     );
+  });
+
+  it('exports mise env vars from json output', async () => {
+    mockedExec.exec.mockImplementationOnce(async (_command, _args, options) => {
+      options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+        JAVA_HOME: '/tmp/java-21',
+        PATH: '/tmp/java-21/bin:/usr/bin',
+      })));
+      return 0;
+    });
+
+    await exportMiseEnv('/tmp/project');
+
+    expect(mockedExec.exec).toHaveBeenCalledWith(
+      getMiseBinPath(),
+      ['env', '--json'],
+      expect.objectContaining({ cwd: '/tmp/project', ignoreReturnCode: true, silent: true }),
+    );
+    expect(mockedCore.exportVariable).toHaveBeenCalledWith('JAVA_HOME', '/tmp/java-21');
+    expect(mockedCore.exportVariable).toHaveBeenCalledWith('PATH', '/tmp/java-21/bin:/usr/bin');
+  });
+
+  it('falls back to dotenv when json export is unavailable', async () => {
+    mockedExec.exec
+      .mockImplementationOnce(async () => 1)
+      .mockImplementationOnce(async (_command, _args, options) => {
+        options?.listeners?.stdout?.(Buffer.from('JAVA_HOME=/tmp/java-21\nPATH=/tmp/java-21/bin:/usr/bin\n'));
+        return 0;
+      });
+
+    await exportMiseEnv();
+
+    expect(mockedCore.exportVariable).toHaveBeenCalledWith('JAVA_HOME', '/tmp/java-21');
+    expect(mockedCore.exportVariable).toHaveBeenCalledWith('PATH', '/tmp/java-21/bin:/usr/bin');
   });
 
   it('reads string versions from mise.toml', async () => {

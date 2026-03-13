@@ -583,8 +583,109 @@ export async function reshimMise(force = true): Promise<void> {
   await exec.exec(getMiseBinPath(), args);
 }
 
+export async function exportMiseEnv(cwd?: string): Promise<void> {
+  core.info('Exporting mise environment...');
+
+  const envVars = await readMiseEnvJson(cwd);
+  if (envVars) {
+    for (const [key, value] of Object.entries(envVars)) {
+      if (typeof value === 'string') {
+        core.exportVariable(key, value);
+      }
+    }
+    return;
+  }
+
+  const dotenv = await readMiseEnvDotenv(cwd);
+  for (const [key, value] of parseDotenvLines(dotenv)) {
+    core.exportVariable(key, value);
+  }
+}
+
 function buildUseArgs(spec: string, global: boolean): string[] {
   return global ? ['use', '-g', spec] : ['use', spec];
+}
+
+async function readMiseEnvJson(cwd?: string): Promise<Record<string, string> | null> {
+  let output = '';
+
+  const exitCode = await exec.exec(
+    getMiseBinPath(),
+    ['env', '--json'],
+    {
+      cwd,
+      ignoreReturnCode: true,
+      silent: true,
+      listeners: {
+        stdout: (data: Buffer) => {
+          output += data.toString();
+        },
+      },
+    },
+  );
+
+  if (exitCode !== 0 || !output.trim()) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(output) as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+    );
+  } catch {
+    return null;
+  }
+}
+
+async function readMiseEnvDotenv(cwd?: string): Promise<string> {
+  let output = '';
+
+  const exitCode = await exec.exec(
+    getMiseBinPath(),
+    ['env', '--dotenv'],
+    {
+      cwd,
+      ignoreReturnCode: true,
+      silent: true,
+      listeners: {
+        stdout: (data: Buffer) => {
+          output += data.toString();
+        },
+      },
+    },
+  );
+
+  if (exitCode !== 0) {
+    throw new Error('Failed to export mise environment');
+  }
+
+  return output;
+}
+
+function parseDotenvLines(content: string): Array<[string, string]> {
+  const entries: Array<[string, string]> = [];
+
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) {
+      continue;
+    }
+
+    const separatorIndex = line.indexOf('=');
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const key = line.slice(0, separatorIndex).trim();
+    const rawValue = line.slice(separatorIndex + 1).trim();
+    const value = rawValue.replace(/^['"]|['"]$/g, '');
+    if (key) {
+      entries.push([key, value]);
+    }
+  }
+
+  return entries;
 }
 
 export async function readToolVersions(workingDir: string): Promise<MiseToolVersion[]> {

@@ -59,6 +59,7 @@ export {
   installMiseTool,
   activateMiseTool,
   reshimMise,
+  exportMiseEnv,
   readToolVersions,
   readToolVersionsValue,
   readMiseTomlTools,
