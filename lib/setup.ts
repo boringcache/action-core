@@ -14,6 +14,8 @@ const GITHUB_RELEASES_BASE = 'https://github.com/boringcache/cli/releases/downlo
 export interface SetupOptions {
   version: string;
   token?: string;
+  /** Override the CLI asset/platform (for example alpine-amd64 or debian-bookworm-amd64) */
+  platform?: string;
   /** Enable automatic caching across workflow runs (default: true) */
   cache?: boolean;
   /** Verify SHA256 checksum of downloaded binary (default: true) */
@@ -33,16 +35,18 @@ export interface ToolCacheInfo {
   cachePattern: string;
   /** Cache key for use with actions/cache */
   cacheKey: string;
+  /** Platform cache key used to separate different CLI assets for the same version */
+  platformKey: string;
 }
 
 /**
  * Get tool cache information for a specific version.
  * Use this to persist the tool cache across workflow runs with actions/cache.
  */
-export function getToolCacheInfo(version: string): ToolCacheInfo {
+export function getToolCacheInfo(version: string, platformOverride?: string): ToolCacheInfo {
   const normalizedVersion = version.replace(/^v/, '');
-  const platform = getPlatformInfo();
-  const cachePath = tc.find(TOOL_NAME, normalizedVersion);
+  const platform = getPlatformInfo(platformOverride);
+  const cachePath = tc.find(TOOL_NAME, normalizedVersion, platform.cacheKey);
   const toolCacheRoot = process.env.RUNNER_TOOL_CACHE || '/opt/hostedtoolcache';
 
   return {
@@ -50,7 +54,8 @@ export function getToolCacheInfo(version: string): ToolCacheInfo {
     version: normalizedVersion,
     cachePath: cachePath || null,
     cachePattern: `${toolCacheRoot}/${TOOL_NAME}/${normalizedVersion}*`,
-    cacheKey: `${TOOL_NAME}-${normalizedVersion}-${platform.os}-${platform.arch}`,
+    cacheKey: `${TOOL_NAME}-${normalizedVersion}-${platform.os}-${platform.cacheKey}`,
+    platformKey: platform.cacheKey,
   };
 }
 
@@ -59,9 +64,23 @@ interface PlatformInfo {
   arch: string;
   assetName: string;
   isWindows: boolean;
+  cacheKey: string;
 }
 
-function getPlatformInfo(): PlatformInfo {
+function getPlatformInfo(platformOverride?: string): PlatformInfo {
+  if (platformOverride) {
+    const normalizedPlatform = platformOverride.trim().toLowerCase();
+    const isWindows = normalizedPlatform.includes('windows');
+
+    return {
+      os: isWindows ? 'windows' : normalizedPlatform.includes('macos') ? 'macos' : 'linux',
+      arch: normalizedPlatform.includes('arm64') ? 'arm64' : 'amd64',
+      assetName: `boringcache-${normalizedPlatform}${isWindows && !normalizedPlatform.endsWith('.exe') ? '.exe' : ''}`,
+      isWindows,
+      cacheKey: normalizedPlatform.replace(/[^a-z0-9.-]+/g, '-'),
+    };
+  }
+
   const runnerOS = process.env.RUNNER_OS || os.platform();
   const runnerArch = process.env.RUNNER_ARCH || os.arch();
 
@@ -104,6 +123,7 @@ function getPlatformInfo(): PlatformInfo {
     arch: normalizedArch.toLowerCase(),
     assetName,
     isWindows,
+    cacheKey: normalizedArch.toLowerCase(),
   };
 }
 
@@ -218,7 +238,7 @@ async function downloadAndInstall(
     await fs.promises.chmod(binaryPath, 0o755);
   }
 
-  const cachedPath = await tc.cacheDir(installDir, TOOL_NAME, version.replace(/^v/, ''));
+  const cachedPath = await tc.cacheDir(installDir, TOOL_NAME, version.replace(/^v/, ''), platform.cacheKey);
   return cachedPath;
 }
 
@@ -276,14 +296,14 @@ export async function ensureBoringCache(options: SetupOptions): Promise<void> {
 
   const version = options.version;
   const normalizedVersion = version.startsWith('v') ? version : `v${version}`;
-  const platform = getPlatformInfo();
+  const platform = getPlatformInfo(options.platform);
   const enableCache = options.cache !== false;
   const enableVerify = options.verify !== false; // Default: true
 
   core.info(`Installing BoringCache CLI ${normalizedVersion}...`);
 
   // Get cache info for this version
-  const cacheInfo = getToolCacheInfo(normalizedVersion);
+  const cacheInfo = getToolCacheInfo(normalizedVersion, options.platform);
   const toolCacheRoot = process.env.RUNNER_TOOL_CACHE || '/opt/hostedtoolcache';
   const cachePaths = [`${toolCacheRoot}/${TOOL_NAME}`];
 
@@ -302,7 +322,7 @@ export async function ensureBoringCache(options: SetupOptions): Promise<void> {
   }
 
   let toolPath: string;
-  let cachedPath = tc.find(TOOL_NAME, normalizedVersion.replace(/^v/, ''));
+  let cachedPath = tc.find(TOOL_NAME, normalizedVersion.replace(/^v/, ''), cacheInfo.platformKey);
 
   if (cachedPath && enableVerify) {
     const binaryName = platform.isWindows ? 'boringcache.exe' : 'boringcache';

@@ -14,6 +14,8 @@ const MOCK_BINARY_HASH = crypto.createHash('sha256').update(MOCK_BINARY_CONTENT)
 // Sample SHA256SUMS content using the mock binary hash
 const SAMPLE_SHA256SUMS = `${MOCK_BINARY_HASH}  boringcache-linux-amd64
 ${MOCK_BINARY_HASH}  boringcache-linux-arm64
+${MOCK_BINARY_HASH}  boringcache-alpine-amd64
+${MOCK_BINARY_HASH}  boringcache-debian-bookworm-amd64
 ${MOCK_BINARY_HASH}  boringcache-macos-14-arm64
 ${MOCK_BINARY_HASH}  boringcache-windows-2022-amd64.exe
 `;
@@ -169,7 +171,7 @@ describe('action-core', () => {
 
       await ensureBoringCache({ version: 'v1.12.3' });
 
-      expect(mockedTc.find).toHaveBeenCalledWith('boringcache', '1.12.3');
+      expect(mockedTc.find).toHaveBeenCalledWith('boringcache', '1.12.3', 'x64');
       expect(mockedTc.downloadTool).not.toHaveBeenCalled();
       expect(mockedCore.addPath).toHaveBeenCalledWith('/tmp/cached-version');
     });
@@ -436,6 +438,18 @@ describe('action-core', () => {
         expect.stringContaining('boringcache-windows-2022-amd64.exe')
       );
     });
+
+    it('respects a CLI platform override', async () => {
+      process.env.RUNNER_OS = 'Linux';
+      process.env.RUNNER_ARCH = 'X64';
+
+      await ensureBoringCache({ version: 'v1.12.3', platform: 'alpine-amd64' });
+
+      expect(mockedTc.downloadTool).toHaveBeenCalledWith(
+        expect.stringContaining('boringcache-alpine-amd64')
+      );
+      expect(mockedTc.find).toHaveBeenCalledWith('boringcache', '1.12.3', 'alpine-amd64');
+    });
   });
 
   describe('getToolCacheInfo', () => {
@@ -449,6 +463,7 @@ describe('action-core', () => {
       expect(info.toolName).toBe('boringcache');
       expect(info.version).toBe('1.12.3');
       expect(info.cachePath).toBeNull();
+      expect(info.platformKey).toBe('x64');
     });
 
     it('normalizes version without v prefix', () => {
@@ -490,6 +505,15 @@ describe('action-core', () => {
       const info = getToolCacheInfo('v1.12.3');
 
       expect(info.cacheKey).toBe('boringcache-1.12.3-linux-arm64');
+    });
+
+    it('separates cache info for platform overrides', () => {
+      mockedTc.find.mockReturnValue('');
+
+      const info = getToolCacheInfo('v1.12.3', 'debian-bookworm-amd64');
+
+      expect(info.platformKey).toBe('debian-bookworm-amd64');
+      expect(info.cacheKey).toBe('boringcache-1.12.3-linux-debian-bookworm-amd64');
     });
   });
 
