@@ -109,10 +109,10 @@ function getPlatformInfo(platformOverride?: string): PlatformInfo {
       assetName = normalizedArch === 'ARM64' ? 'boringcache-linux-arm64' : 'boringcache-linux-amd64';
       break;
     case 'macOS':
-      assetName = 'boringcache-macos-14-arm64';
+      assetName = 'boringcache-macos-universal';
       break;
     case 'Windows':
-      assetName = 'boringcache-windows-2022-amd64.exe';
+      assetName = 'boringcache-windows-amd64.exe';
       break;
     default:
       throw new Error(`Unsupported platform: OS=${runnerOS}, ARCH=${runnerArch}`);

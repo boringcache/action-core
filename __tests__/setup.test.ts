@@ -16,8 +16,8 @@ const SAMPLE_SHA256SUMS = `${MOCK_BINARY_HASH}  boringcache-linux-amd64
 ${MOCK_BINARY_HASH}  boringcache-linux-arm64
 ${MOCK_BINARY_HASH}  boringcache-linux-musl-amd64
 ${MOCK_BINARY_HASH}  boringcache-linux-musl-arm64
-${MOCK_BINARY_HASH}  boringcache-macos-14-arm64
-${MOCK_BINARY_HASH}  boringcache-windows-2022-amd64.exe
+${MOCK_BINARY_HASH}  boringcache-macos-universal
+${MOCK_BINARY_HASH}  boringcache-windows-amd64.exe
 `;
 
 jest.mock('fs', () => ({
@@ -441,7 +441,7 @@ describe('action-core', () => {
       await ensureBoringCache({ version: 'v1.12.3' });
 
       expect(mockedTc.downloadTool).toHaveBeenCalledWith(
-        expect.stringContaining('boringcache-macos-14-arm64')
+        expect.stringContaining('boringcache-macos-universal')
       );
     });
 
@@ -452,7 +452,7 @@ describe('action-core', () => {
       await ensureBoringCache({ version: 'v1.12.3' });
 
       expect(mockedTc.downloadTool).toHaveBeenCalledWith(
-        expect.stringContaining('boringcache-windows-2022-amd64.exe')
+        expect.stringContaining('boringcache-windows-amd64.exe')
       );
     });
 
