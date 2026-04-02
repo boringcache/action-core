@@ -6,11 +6,20 @@ on:
     paths:
       - 'lib/**'
       - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/**'
   pull_request:
     branches: [main]
   workflow_dispatch:
   schedule:
     - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: action-core-integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   integration-linux:
@@ -26,15 +35,16 @@ jobs:
             arch: arm64
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
+          cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build
         run: npm run build
@@ -74,16 +84,17 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
+          cache: 'npm'
 
       - name: Install and test
         run: |
-          npm install
+          npm ci
           npm run build
           node -e "
             const { ensureBoringCache, isCliAvailable } = require('./dist/index.js');
@@ -103,17 +114,18 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
+          cache: 'npm'
 
       - name: Install and test
         shell: pwsh
         run: |
-          npm install
+          npm ci
           npm run build
           node -e "
             const { ensureBoringCache, isCliAvailable } = require('./dist/index.js');
@@ -133,16 +145,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
+          cache: 'npm'
 
       - name: Test with cache disabled
         run: |
-          npm install
+          npm ci
           npm run build
           node -e "
             const { ensureBoringCache } = require('./dist/index.js');
