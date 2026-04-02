@@ -2,7 +2,7 @@
 
 Shared helpers used by BoringCache GitHub Actions.
 
-This package is for action authors and internal integrations. If you are setting up a workflow, start with the public docs or one of the published actions instead.
+This package is for action authors and internal integrations. If you are setting up a workflow, use [`boringcache/one@v1`](https://github.com/boringcache/one). `action-core` is not a workflow entrypoint, and archived wrapper actions are not the recommended path.
 
 ## When to use it
 

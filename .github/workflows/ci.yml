@@ -6,10 +6,19 @@ on:
     paths:
       - 'lib/**'
       - 'package.json'
+      - 'package-lock.json'
       - 'tsconfig.json'
+      - '.github/workflows/**'
   pull_request:
     branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: action-core-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -17,15 +26,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: boringcache/nodejs-action@v1
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
-          workspace: boringcache/actions
-        env:
-          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN }}
+          node-version: '24'
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
@@ -48,21 +55,19 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node: ['20', '22']
+        node: ['20', '24']
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: boringcache/nodejs-action@v1
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
-          workspace: boringcache/actions
-        env:
-          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN }}
+          cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build
         run: npm run build
