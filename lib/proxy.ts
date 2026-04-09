@@ -31,6 +31,9 @@ export interface ProxyHandle {
 }
 
 const PROXY_PID_FILE = path.join(os.tmpdir(), 'boringcache-proxy.pid');
+const PROXY_PREFETCH_STATE_HEADER = 'x-boringcache-prefetch-state';
+const PROXY_PREFETCH_STATE_READY = 'ready';
+const PROXY_PREFETCH_STATE_WARMING = 'warming';
 
 export function normalizeProxyTags(tagInput: string): string {
   const tags: string[] = [];
@@ -84,6 +87,49 @@ async function isProxyRunning(port: number): Promise<boolean> {
     });
   } catch {
     return false;
+  }
+}
+
+interface ProxyReadinessProbe {
+  ready: boolean;
+  state: string | null;
+}
+
+async function probeProxyReadiness(port: number): Promise<ProxyReadinessProbe> {
+  try {
+    return await new Promise<ProxyReadinessProbe>((resolve) => {
+      const req = http.get(`http://127.0.0.1:${port}/v2/`, (res) => {
+        const header = res.headers[PROXY_PREFETCH_STATE_HEADER];
+        const state = Array.isArray(header) ? header[0] ?? null : header ?? null;
+        res.resume();
+
+        if (res.statusCode === 401) {
+          resolve({ ready: true, state: 'unauthorized' });
+          return;
+        }
+
+        if (res.statusCode === 200) {
+          if (!state) {
+            resolve({ ready: true, state: null });
+            return;
+          }
+          resolve({
+            ready: state.toLowerCase() === PROXY_PREFETCH_STATE_READY,
+            state,
+          });
+          return;
+        }
+
+        resolve({ ready: false, state });
+      });
+      req.on('error', () => resolve({ ready: false, state: null }));
+      req.setTimeout(1000, () => {
+        req.destroy();
+        resolve({ ready: false, state: null });
+      });
+    });
+  } catch {
+    return { ready: false, state: null };
   }
 }
 
@@ -181,6 +227,7 @@ export async function waitForProxy(port: number, timeoutMs = 300000, pid?: numbe
   const start = Date.now();
   const interval = 500;
   let lastLogAt = 0;
+  let lastState: string | null = null;
 
   while (Date.now() - start < timeoutMs) {
     if (pid && pid > 0 && !isProcessAlive(pid)) {
@@ -189,17 +236,9 @@ export async function waitForProxy(port: number, timeoutMs = 300000, pid?: numbe
     }
 
     try {
-      const ok = await new Promise<boolean>((resolve) => {
-        const req = http.get(`http://127.0.0.1:${port}/v2/`, (res) => {
-          resolve(res.statusCode === 200 || res.statusCode === 401);
-        });
-        req.on('error', () => resolve(false));
-        req.setTimeout(1000, () => {
-          req.destroy();
-          resolve(false);
-        });
-      });
-      if (ok) {
+      const probe = await probeProxyReadiness(port);
+      lastState = probe.state;
+      if (probe.ready) {
         const elapsed = ((Date.now() - start) / 1000).toFixed(1);
         core.info(`Registry proxy is ready (${elapsed}s)`);
         return;
@@ -209,7 +248,10 @@ export async function waitForProxy(port: number, timeoutMs = 300000, pid?: numbe
 
     const elapsed = Date.now() - start;
     if (elapsed - lastLogAt >= 10000) {
-      core.info(`Waiting for proxy readiness... (${(elapsed / 1000).toFixed(0)}s)`);
+      const suffix = lastState?.toLowerCase() === PROXY_PREFETCH_STATE_WARMING
+        ? ', prefetch warming'
+        : '';
+      core.info(`Waiting for proxy readiness... (${(elapsed / 1000).toFixed(0)}s${suffix})`);
       lastLogAt = elapsed;
     }
 

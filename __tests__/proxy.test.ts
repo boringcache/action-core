@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -52,5 +53,31 @@ describe('waitForProxy log lookup', () => {
     fs.writeFileSync(logPath, 'timeout log');
 
     await expect(waitForProxy(7001, 0)).rejects.toThrow('timeout log');
+  });
+
+  it('waits for the prefetch readiness header before succeeding', async () => {
+    let requests = 0;
+    const server = http.createServer((_req, res) => {
+      requests += 1;
+      res.statusCode = 200;
+      res.setHeader(
+        'X-BoringCache-Prefetch-State',
+        requests === 1 ? 'warming' : 'ready',
+      );
+      res.end();
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('failed to bind test server');
+    }
+
+    try {
+      await expect(waitForProxy(address.port, 3000)).resolves.toBeUndefined();
+      expect(requests).toBeGreaterThanOrEqual(2);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
   });
 });
