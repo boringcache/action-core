@@ -49,6 +49,75 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Test proxy startup contract
+        env:
+          BORINGCACHE_SAVE_TOKEN: integration-save-token
+        run: |
+          set -euo pipefail
+
+          tmp_bin="$RUNNER_TEMP/action-core-proxy-bin"
+          mkdir -p "$tmp_bin"
+          cat >"$tmp_bin/boringcache" <<'EOF'
+          #!/usr/bin/env node
+          const fs = require('fs');
+
+          const args = process.argv.slice(2);
+          let readyFile = '';
+          for (let i = 0; i < args.length; i += 1) {
+            if (args[i] === '--ready-file') {
+              readyFile = args[i + 1];
+              i += 1;
+            }
+          }
+
+          const keepAlive = setInterval(() => {}, 1000);
+          const readyTimer = setTimeout(() => {
+            if (readyFile) {
+              fs.writeFileSync(readyFile, 'ready\n');
+            }
+          }, 1200);
+
+          process.on('SIGTERM', () => {
+            clearInterval(keepAlive);
+            clearTimeout(readyTimer);
+            process.exit(0);
+          });
+          EOF
+          chmod +x "$tmp_bin/boringcache"
+
+          PATH="$tmp_bin:$PATH" node -e "
+            const fs = require('fs');
+            const os = require('os');
+            const path = require('path');
+            const { findAvailablePort, startRegistryProxy, stopRegistryProxy } = require('./dist/index.js');
+
+            async function main() {
+              const port = await findAvailablePort();
+              const readyFile = path.join(os.tmpdir(), \`boringcache-proxy-\${port}.ready\`);
+              const startedAt = Date.now();
+              const proxy = await startRegistryProxy({
+                command: 'cache-registry',
+                workspace: 'org/repo',
+                tag: 'integration-proxy',
+                port,
+              });
+              const elapsed = Date.now() - startedAt;
+              if (elapsed < 1000) {
+                throw new Error(\`startRegistryProxy returned before proxy became ready (\${elapsed}ms)\`);
+              }
+              if (fs.existsSync(readyFile)) {
+                throw new Error('startRegistryProxy left the ready marker behind');
+              }
+
+              await stopRegistryProxy(proxy.pid);
+            }
+
+            main().catch((error) => {
+              console.error(error);
+              process.exit(1);
+            });
+          "
+
       - name: Test CLI download and caching
         run: |
           node -e "

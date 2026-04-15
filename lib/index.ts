@@ -39,7 +39,6 @@ export {
 
 export {
   startRegistryProxy,
-  waitForProxy,
   stopRegistryProxy,
   findAvailablePort,
   ProxyOptions,
