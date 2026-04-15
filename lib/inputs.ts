@@ -26,7 +26,6 @@ export async function getCacheConfig(
 ): Promise<CacheConfig> {
   let workspace =
     process.env.BORINGCACHE_DEFAULT_WORKSPACE ||
-    process.env.GITHUB_REPOSITORY ||
     'default/default';
 
   if (!workspace.includes('/')) {
@@ -167,12 +166,6 @@ export function getInputsWorkspace(inputs: Record<string, unknown>): string {
   const defaultWorkspace = process.env.BORINGCACHE_DEFAULT_WORKSPACE;
   if (defaultWorkspace) {
     return defaultWorkspace.includes('/') ? defaultWorkspace : `default/${defaultWorkspace}`;
-  }
-
-  const repo = process.env.GITHUB_REPOSITORY;
-  if (repo) {
-    const parts = repo.split('/');
-    return `${parts[0]}/${parts[1]}`;
   }
 
   return 'default/default';

@@ -21,18 +21,11 @@ export function getWorkspace(inputWorkspace: string): string {
 }
 
 /**
- * Resolve cache tag prefix from input or GITHUB_REPOSITORY.
- * Falls back to the provided default (e.g. 'nodejs', 'rust', 'ruby').
+ * Resolve cache tag prefix from input or the provided default.
  */
 export function getCacheTagPrefix(inputCacheTag: string, defaultPrefix: string): string {
   if (inputCacheTag) {
     return inputCacheTag;
-  }
-
-  const repo = process.env.GITHUB_REPOSITORY || '';
-  if (repo) {
-    const repoName = repo.split('/')[1] || repo;
-    return repoName;
   }
 
   return defaultPrefix;

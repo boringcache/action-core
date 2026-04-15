@@ -14,7 +14,7 @@ const GITHUB_RELEASES_BASE = 'https://github.com/boringcache/cli/releases/downlo
 export interface SetupOptions {
   version: string;
   token?: string;
-  /** Override the CLI asset/platform (for example alpine-amd64 or debian-bookworm-amd64) */
+  /** Override the CLI target/platform (for example linux-amd64 or linux-musl-amd64). Legacy distro aliases are normalized. */
   platform?: string;
   /** Enable automatic caching across workflow runs (default: true) */
   cache?: boolean;
@@ -63,6 +63,7 @@ interface PlatformInfo {
   os: string;
   arch: string;
   assetName: string;
+  fallbackAssetName?: string;
   isWindows: boolean;
   cacheKey: string;
 }
@@ -71,13 +72,44 @@ function getPlatformInfo(platformOverride?: string): PlatformInfo {
   if (platformOverride) {
     const normalizedPlatform = platformOverride.trim().toLowerCase();
     const isWindows = normalizedPlatform.includes('windows');
+    const arch = normalizedPlatform.includes('arm64') ? 'arm64' : 'amd64';
+    const legacyAssetName = `boringcache-${normalizedPlatform}${isWindows && !normalizedPlatform.endsWith('.exe') ? '.exe' : ''}`;
+
+    if (isWindows) {
+      const assetName = `boringcache-windows-${arch}.exe`;
+      return {
+        os: 'windows',
+        arch,
+        assetName,
+        fallbackAssetName: legacyAssetName === assetName ? undefined : legacyAssetName,
+        isWindows: true,
+        cacheKey: arch,
+      };
+    }
+
+    if (normalizedPlatform.includes('macos') || normalizedPlatform.includes('darwin')) {
+      const assetName = 'boringcache-macos-universal';
+      return {
+        os: 'macos',
+        arch,
+        assetName,
+        fallbackAssetName: legacyAssetName === assetName ? undefined : legacyAssetName,
+        isWindows: false,
+        cacheKey: 'universal',
+      };
+    }
+
+    const usesMusl = normalizedPlatform.includes('alpine') || normalizedPlatform.includes('musl');
+    const genericPlatform = `linux${usesMusl ? '-musl' : ''}-${arch}`;
+    const assetName = `boringcache-${genericPlatform}`;
 
     return {
-      os: isWindows ? 'windows' : normalizedPlatform.includes('macos') ? 'macos' : 'linux',
-      arch: normalizedPlatform.includes('arm64') ? 'arm64' : 'amd64',
-      assetName: `boringcache-${normalizedPlatform}${isWindows && !normalizedPlatform.endsWith('.exe') ? '.exe' : ''}`,
-      isWindows,
-      cacheKey: normalizedPlatform.replace(/[^a-z0-9.-]+/g, '-'),
+      os: 'linux',
+      arch,
+      assetName,
+      fallbackAssetName: legacyAssetName === assetName ? undefined : legacyAssetName,
+      isWindows: false,
+      cacheKey: usesMusl ? `musl-${arch}` : arch,
     };
   }
 
@@ -109,10 +141,10 @@ function getPlatformInfo(platformOverride?: string): PlatformInfo {
       assetName = normalizedArch === 'ARM64' ? 'boringcache-linux-arm64' : 'boringcache-linux-amd64';
       break;
     case 'macOS':
-      assetName = 'boringcache-macos-14-arm64';
+      assetName = 'boringcache-macos-universal';
       break;
     case 'Windows':
-      assetName = 'boringcache-windows-2022-amd64.exe';
+      assetName = normalizedArch === 'ARM64' ? 'boringcache-windows-arm64.exe' : 'boringcache-windows-amd64.exe';
       break;
     default:
       throw new Error(`Unsupported platform: OS=${runnerOS}, ARCH=${runnerArch}`);
@@ -123,7 +155,12 @@ function getPlatformInfo(platformOverride?: string): PlatformInfo {
     arch: normalizedArch.toLowerCase(),
     assetName,
     isWindows,
-    cacheKey: normalizedArch.toLowerCase(),
+    cacheKey:
+      normalizedOS === 'macOS'
+        ? 'universal'
+        : normalizedArch === 'ARM64'
+          ? 'arm64'
+          : 'amd64',
   };
 }
 
@@ -214,7 +251,8 @@ async function downloadAndInstall(
   platform: PlatformInfo,
   verify: boolean
 ): Promise<string> {
-  const downloadUrl = getDownloadUrl(version, platform.assetName);
+  let resolvedAssetName = platform.assetName;
+  let downloadUrl = getDownloadUrl(version, resolvedAssetName);
   core.info(`Downloading BoringCache CLI from: ${downloadUrl}`);
 
   let downloadedPath: string;
@@ -222,21 +260,42 @@ async function downloadAndInstall(
     downloadedPath = await tc.downloadTool(downloadUrl);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    if (msg.includes('404')) {
+    if (platform.fallbackAssetName) {
+      resolvedAssetName = platform.fallbackAssetName;
+      downloadUrl = getDownloadUrl(version, resolvedAssetName);
+      core.info(
+        `Primary CLI asset ${platform.assetName} unavailable (${msg}); trying legacy fallback: ${resolvedAssetName}`
+      );
+      try {
+        downloadedPath = await tc.downloadTool(downloadUrl);
+      } catch (fallbackError) {
+        const fallbackMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+        if (fallbackMsg.includes('404')) {
+          throw new Error(
+            `Failed to download BoringCache CLI ${version} (${platform.assetName}, fallback ${resolvedAssetName}): ` +
+            'release asset not found. The requested cli-version may not be published yet.'
+          );
+        }
+        throw new Error(
+          `Failed to download BoringCache CLI ${version} (${platform.assetName}, fallback ${resolvedAssetName}): ${fallbackMsg}`
+        );
+      }
+    } else if (msg.includes('404')) {
       throw new Error(
         `Failed to download BoringCache CLI ${version} (${platform.assetName}) from ${downloadUrl}: ` +
         'release asset not found. The requested cli-version may not be published yet.'
       );
+    } else {
+      throw new Error(
+        `Failed to download BoringCache CLI ${version} (${platform.assetName}) from ${downloadUrl}: ${msg}`
+      );
     }
-    throw new Error(
-      `Failed to download BoringCache CLI ${version} (${platform.assetName}) from ${downloadUrl}: ${msg}`
-    );
   }
 
   // Verify checksum if enabled
   if (verify) {
-    const expectedChecksum = await getExpectedChecksum(version, platform.assetName);
-    await verifyChecksum(downloadedPath, expectedChecksum, platform.assetName);
+    const expectedChecksum = await getExpectedChecksum(version, resolvedAssetName);
+    await verifyChecksum(downloadedPath, expectedChecksum, resolvedAssetName);
   } else {
     core.warning('Checksum verification disabled - this is not recommended for production use');
   }

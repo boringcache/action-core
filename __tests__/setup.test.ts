@@ -16,8 +16,10 @@ const SAMPLE_SHA256SUMS = `${MOCK_BINARY_HASH}  boringcache-linux-amd64
 ${MOCK_BINARY_HASH}  boringcache-linux-arm64
 ${MOCK_BINARY_HASH}  boringcache-linux-musl-amd64
 ${MOCK_BINARY_HASH}  boringcache-linux-musl-arm64
-${MOCK_BINARY_HASH}  boringcache-macos-14-arm64
-${MOCK_BINARY_HASH}  boringcache-windows-2022-amd64.exe
+${MOCK_BINARY_HASH}  boringcache-alpine-amd64
+${MOCK_BINARY_HASH}  boringcache-macos-universal
+${MOCK_BINARY_HASH}  boringcache-windows-amd64.exe
+${MOCK_BINARY_HASH}  boringcache-windows-arm64.exe
 `;
 
 jest.mock('fs', () => ({
@@ -171,7 +173,7 @@ describe('action-core', () => {
 
       await ensureBoringCache({ version: 'v1.12.3' });
 
-      expect(mockedTc.find).toHaveBeenCalledWith('boringcache', '1.12.3', 'x64');
+      expect(mockedTc.find).toHaveBeenCalledWith('boringcache', '1.12.3', 'amd64');
       expect(mockedTc.downloadTool).not.toHaveBeenCalled();
       expect(mockedCore.addPath).toHaveBeenCalledWith('/tmp/cached-version');
     });
@@ -441,7 +443,7 @@ describe('action-core', () => {
       await ensureBoringCache({ version: 'v1.12.3' });
 
       expect(mockedTc.downloadTool).toHaveBeenCalledWith(
-        expect.stringContaining('boringcache-macos-14-arm64')
+        expect.stringContaining('boringcache-macos-universal')
       );
     });
 
@@ -452,7 +454,7 @@ describe('action-core', () => {
       await ensureBoringCache({ version: 'v1.12.3' });
 
       expect(mockedTc.downloadTool).toHaveBeenCalledWith(
-        expect.stringContaining('boringcache-windows-2022-amd64.exe')
+        expect.stringContaining('boringcache-windows-amd64.exe')
       );
     });
 
@@ -465,7 +467,60 @@ describe('action-core', () => {
       expect(mockedTc.downloadTool).toHaveBeenCalledWith(
         expect.stringContaining('boringcache-linux-musl-amd64')
       );
-      expect(mockedTc.find).toHaveBeenCalledWith('boringcache', '1.12.3', 'linux-musl-amd64');
+      expect(mockedTc.find).toHaveBeenCalledWith('boringcache', '1.12.3', 'musl-amd64');
+    });
+
+    it('normalizes distro-style glibc overrides to generic linux assets', async () => {
+      process.env.RUNNER_OS = 'Linux';
+      process.env.RUNNER_ARCH = 'X64';
+
+      await ensureBoringCache({ version: 'v1.12.3', platform: 'debian-bookworm-amd64' });
+
+      expect(mockedTc.downloadTool).toHaveBeenCalledWith(
+        expect.stringContaining('boringcache-linux-amd64')
+      );
+      expect(mockedTc.downloadTool).not.toHaveBeenCalledWith(
+        expect.stringContaining('boringcache-debian-bookworm-amd64')
+      );
+      expect(mockedTc.find).toHaveBeenCalledWith('boringcache', '1.12.3', 'amd64');
+    });
+
+    it('normalizes distro-style musl overrides to generic musl assets', async () => {
+      process.env.RUNNER_OS = 'Linux';
+      process.env.RUNNER_ARCH = 'X64';
+
+      await ensureBoringCache({ version: 'v1.12.3', platform: 'alpine-amd64' });
+
+      expect(mockedTc.downloadTool).toHaveBeenCalledWith(
+        expect.stringContaining('boringcache-linux-musl-amd64')
+      );
+      expect(mockedTc.find).toHaveBeenCalledWith('boringcache', '1.12.3', 'musl-amd64');
+    });
+
+    it('falls back to legacy override asset names when the generic asset is unavailable', async () => {
+      mockedTc.downloadTool.mockReset();
+      mockedTc.downloadTool
+        .mockRejectedValueOnce(new Error('Unexpected HTTP response: 404'))
+        .mockResolvedValueOnce('/tmp/dl')
+        .mockResolvedValueOnce('/tmp/checksums');
+
+      process.env.RUNNER_OS = 'Linux';
+      process.env.RUNNER_ARCH = 'X64';
+
+      await ensureBoringCache({ version: 'v1.12.3', platform: 'alpine-amd64' });
+
+      expect(mockedTc.downloadTool).toHaveBeenNthCalledWith(
+        1,
+        'https://github.com/boringcache/cli/releases/download/v1.12.3/boringcache-linux-musl-amd64'
+      );
+      expect(mockedTc.downloadTool).toHaveBeenNthCalledWith(
+        2,
+        'https://github.com/boringcache/cli/releases/download/v1.12.3/boringcache-alpine-amd64'
+      );
+      expect(mockedTc.downloadTool).toHaveBeenNthCalledWith(
+        3,
+        'https://github.com/boringcache/cli/releases/download/v1.12.3/SHA256SUMS'
+      );
     });
   });
 
@@ -480,7 +535,7 @@ describe('action-core', () => {
       expect(info.toolName).toBe('boringcache');
       expect(info.version).toBe('1.12.3');
       expect(info.cachePath).toBeNull();
-      expect(info.platformKey).toBe('x64');
+      expect(info.platformKey).toBe('amd64');
     });
 
     it('normalizes version without v prefix', () => {
@@ -529,8 +584,17 @@ describe('action-core', () => {
 
       const info = getToolCacheInfo('v1.12.3', 'linux-musl-amd64');
 
-      expect(info.platformKey).toBe('linux-musl-amd64');
-      expect(info.cacheKey).toBe('boringcache-1.12.3-linux-linux-musl-amd64');
+      expect(info.platformKey).toBe('musl-amd64');
+      expect(info.cacheKey).toBe('boringcache-1.12.3-linux-musl-amd64');
+    });
+
+    it('normalizes distro-style platform overrides in cache info', () => {
+      mockedTc.find.mockReturnValue('');
+
+      const info = getToolCacheInfo('v1.12.3', 'debian-bookworm-amd64');
+
+      expect(info.platformKey).toBe('amd64');
+      expect(info.cacheKey).toBe('boringcache-1.12.3-linux-amd64');
     });
   });
 
@@ -563,7 +627,7 @@ describe('action-core', () => {
 
       expect(mockedCache.saveCache).toHaveBeenCalledWith(
         expect.any(Array),
-        expect.stringContaining('boringcache-1.12.3-linux-x64')
+        expect.stringContaining('boringcache-1.12.3-linux-amd64')
       );
     });
 

@@ -14,7 +14,7 @@ describe('workspace helpers', () => {
     process.env = originalEnv;
   });
 
-  it('uses BORINGCACHE_DEFAULT_WORKSPACE before GITHUB_REPOSITORY for input-based resolution', () => {
+  it('uses BORINGCACHE_DEFAULT_WORKSPACE for input-based resolution', () => {
     process.env.BORINGCACHE_DEFAULT_WORKSPACE = 'boringcache/web';
     process.env.GITHUB_REPOSITORY = 'owner/repo';
 
@@ -31,5 +31,11 @@ describe('workspace helpers', () => {
     process.env.BORINGCACHE_DEFAULT_WORKSPACE = 'boringcache/web';
 
     expect(getWorkspace('')).toBe('boringcache/web');
+  });
+
+  it('does not fall back to GITHUB_REPOSITORY for input-based resolution', () => {
+    process.env.GITHUB_REPOSITORY = 'owner/repo';
+
+    expect(getInputsWorkspace({})).toBe('default/default');
   });
 });
