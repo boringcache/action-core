@@ -154,7 +154,7 @@ process.on('SIGTERM', () => {
     }
   });
 
-  it('passes on-demand startup through to the proxy command', async () => {
+  it('passes proxy startup options through to the proxy command', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'action-core-proxy-bin-on-demand-'));
     const binDir = path.join(tempRoot, 'bin');
     fs.mkdirSync(binDir, { recursive: true });
@@ -205,9 +205,22 @@ process.on('SIGTERM', () => {
         tag: 'integration-proxy',
         port,
         onDemand: true,
+        ociPrefetchRefs: ['cache@buildcache'],
+        metadataHints: {
+          project: 'immich',
+          phase: 'rolling',
+        },
       });
       const args = JSON.parse(fs.readFileSync(argsPath, 'utf8')) as string[];
       expect(args).toContain('--on-demand');
+      expect(args).toEqual(expect.arrayContaining([
+        '--oci-prefetch-ref',
+        'cache@buildcache',
+        '--metadata-hint',
+        'project=immich',
+        '--metadata-hint',
+        'phase=rolling',
+      ]));
 
       await stopRegistryProxy(proxy.pid);
     } finally {

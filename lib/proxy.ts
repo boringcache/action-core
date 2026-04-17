@@ -22,6 +22,8 @@ export interface ProxyOptions {
   verbose?: boolean;
   readOnly?: boolean;
   onDemand?: boolean;
+  ociPrefetchRefs?: string[];
+  metadataHints?: Record<string, string>;
 }
 
 export interface ProxyHandle {
@@ -206,6 +208,15 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
   if (options.onDemand) {
     args.push('--on-demand');
   }
+  for (const ref of options.ociPrefetchRefs || []) {
+    const trimmed = ref.trim();
+    if (trimmed) {
+      args.push('--oci-prefetch-ref', trimmed);
+    }
+  }
+  for (const [key, value] of Object.entries(options.metadataHints || {})) {
+    args.push('--metadata-hint', `${key}=${value}`);
+  }
   if (effectiveReadOnly) {
     args.push('--read-only');
   }
@@ -221,8 +232,9 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
   if (effectiveReadOnly) {
     core.info('Registry proxy mode: read-only');
   }
-  if (options.onDemand) {
-    core.info('Registry proxy startup: on-demand');
+  core.info(`Registry proxy startup: ${options.onDemand ? 'on-demand' : 'warm'}`);
+  if (options.ociPrefetchRefs?.length) {
+    core.info(`Registry proxy OCI prefetch refs: ${options.ociPrefetchRefs.join(', ')}`);
   }
 
   const logFile = proxyLogPath(options.port);
