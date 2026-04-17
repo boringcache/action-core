@@ -154,6 +154,93 @@ process.on('SIGTERM', () => {
     }
   });
 
+  it('passes on-demand startup through to the proxy command', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'action-core-proxy-bin-on-demand-'));
+    const binDir = path.join(tempRoot, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const boringcachePath = path.join(binDir, 'boringcache');
+    const argsPath = path.join(tempRoot, 'args.json');
+    fs.writeFileSync(
+      boringcachePath,
+      `#!/usr/bin/env node
+const fs = require('fs');
+const args = process.argv.slice(2);
+let readyFile = '';
+for (let i = 0; i < args.length; i += 1) {
+  if (args[i] === '--ready-file') {
+    readyFile = args[i + 1];
+    i += 1;
+  }
+}
+fs.writeFileSync(process.env.BORINGCACHE_PROXY_ARGS_FILE, JSON.stringify(args));
+if (readyFile) {
+  fs.writeFileSync(readyFile, 'ready\\n');
+}
+const keepAlive = setInterval(() => {}, 1000);
+process.on('SIGTERM', () => {
+  clearInterval(keepAlive);
+  process.exit(0);
+});
+`,
+      { mode: 0o755 }
+    );
+
+    const originalPath = process.env.PATH;
+    const originalSaveToken = process.env.BORINGCACHE_SAVE_TOKEN;
+    const originalRestoreToken = process.env.BORINGCACHE_RESTORE_TOKEN;
+    const originalApiToken = process.env.BORINGCACHE_API_TOKEN;
+    const originalArgsFile = process.env.BORINGCACHE_PROXY_ARGS_FILE;
+    const port = await findTestPort();
+
+    process.env.PATH = `${binDir}${path.delimiter}${originalPath || ''}`;
+    process.env.BORINGCACHE_SAVE_TOKEN = 'test-save-token';
+    process.env.BORINGCACHE_PROXY_ARGS_FILE = argsPath;
+    delete process.env.BORINGCACHE_RESTORE_TOKEN;
+    delete process.env.BORINGCACHE_API_TOKEN;
+
+    try {
+      const proxy = await startRegistryProxy({
+        command: 'cache-registry',
+        workspace: 'org/repo',
+        tag: 'integration-proxy',
+        port,
+        onDemand: true,
+      });
+      const args = JSON.parse(fs.readFileSync(argsPath, 'utf8')) as string[];
+      expect(args).toContain('--on-demand');
+
+      await stopRegistryProxy(proxy.pid);
+    } finally {
+      if (originalPath === undefined) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = originalPath;
+      }
+      if (originalSaveToken === undefined) {
+        delete process.env.BORINGCACHE_SAVE_TOKEN;
+      } else {
+        process.env.BORINGCACHE_SAVE_TOKEN = originalSaveToken;
+      }
+      if (originalRestoreToken === undefined) {
+        delete process.env.BORINGCACHE_RESTORE_TOKEN;
+      } else {
+        process.env.BORINGCACHE_RESTORE_TOKEN = originalRestoreToken;
+      }
+      if (originalApiToken === undefined) {
+        delete process.env.BORINGCACHE_API_TOKEN;
+      } else {
+        process.env.BORINGCACHE_API_TOKEN = originalApiToken;
+      }
+      if (originalArgsFile === undefined) {
+        delete process.env.BORINGCACHE_PROXY_ARGS_FILE;
+      } else {
+        process.env.BORINGCACHE_PROXY_ARGS_FILE = originalArgsFile;
+      }
+      cleanupProxyArtifacts(port);
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it('reads the per-port proxy log when the proxy exits before readiness', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'action-core-proxy-bin-fail-'));
     const binDir = path.join(tempRoot, 'bin');

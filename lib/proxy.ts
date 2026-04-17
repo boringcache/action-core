@@ -21,6 +21,7 @@ export interface ProxyOptions {
   noPlatform?: boolean;
   verbose?: boolean;
   readOnly?: boolean;
+  onDemand?: boolean;
 }
 
 export interface ProxyHandle {
@@ -202,6 +203,9 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
   }
   args.push('--host', host, '--port', String(options.port));
   args.push('--ready-file', readyFile);
+  if (options.onDemand) {
+    args.push('--on-demand');
+  }
   if (effectiveReadOnly) {
     args.push('--read-only');
   }
@@ -216,6 +220,9 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
   }
   if (effectiveReadOnly) {
     core.info('Registry proxy mode: read-only');
+  }
+  if (options.onDemand) {
+    core.info('Registry proxy startup: on-demand');
   }
 
   const logFile = proxyLogPath(options.port);
