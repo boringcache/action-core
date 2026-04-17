@@ -128,7 +128,7 @@ jobs:
               const before = await isCliAvailable();
               console.log('CLI available before:', before);
 
-              await ensureBoringCache({ version: 'v1.1.0' });
+              await ensureBoringCache({ version: 'v1.12.32' });
 
               const after = await isCliAvailable();
               console.log('CLI available after:', after);
@@ -136,7 +136,7 @@ jobs:
 
               console.log('=== Second install (should use cache) ===');
               const start = Date.now();
-              await ensureBoringCache({ version: 'v1.1.0' });
+              await ensureBoringCache({ version: 'v1.12.32' });
               console.log('Cached install took:', Date.now() - start, 'ms');
 
               console.log('Integration test passed!');
@@ -168,7 +168,7 @@ jobs:
           node -e "
             const { ensureBoringCache, isCliAvailable } = require('./dist/index.js');
             async function main() {
-              await ensureBoringCache({ version: 'v1.1.0' });
+              await ensureBoringCache({ version: 'v1.12.32' });
               if (!(await isCliAvailable())) throw new Error('CLI not available');
               console.log('macOS test passed!');
             }
@@ -199,7 +199,7 @@ jobs:
           node -e "
             const { ensureBoringCache, isCliAvailable } = require('./dist/index.js');
             async function main() {
-              await ensureBoringCache({ version: 'v1.1.0' });
+              await ensureBoringCache({ version: 'v1.12.32' });
               if (!(await isCliAvailable())) throw new Error('CLI not available');
               console.log('Windows test passed!');
             }
@@ -229,7 +229,7 @@ jobs:
           node -e "
             const { ensureBoringCache } = require('./dist/index.js');
             async function main() {
-              await ensureBoringCache({ version: 'v1.1.0', cache: false });
+              await ensureBoringCache({ version: 'v1.12.32', cache: false });
               console.log('Cache disabled test passed!');
             }
             main().catch(e => { console.error(e); process.exit(1); });
