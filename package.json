@@ -1,7 +1,7 @@
 {
   "name": "@boringcache/action-core",
   "version": "1.12.18",
-  "description": "Shared core library for BoringCache GitHub Actions",
+  "description": "Deprecated legacy compatibility helpers for older BoringCache GitHub Actions",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
