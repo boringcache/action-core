@@ -1,12 +1,12 @@
-# @boringcache/action-core
+# @boringcache/action-core (archived)
 
-Legacy shared helpers used by older BoringCache GitHub Actions.
+This repository is archived. It exists only as a historical compatibility package for older BoringCache GitHub Actions code.
 
-This package is for compatibility with older action code. It is not a workflow entrypoint; use [`boringcache/one@v1`](https://github.com/boringcache/one) for workflows.
+Do not use this package for new work. It is not a workflow entrypoint; use [`boringcache/one@v1`](https://github.com/boringcache/one) for workflows.
 
 Maintained product action code now lives directly in [`boringcache/one`](https://github.com/boringcache/one), including the internal core helpers under `lib/core/`. Do not add new product behavior here first; keep `one` self-contained so action releases do not depend on a separate npm package release train.
 
-Install only when maintaining older action code:
+Install only when maintaining older archived action code:
 
 ```bash
 npm install @boringcache/action-core
